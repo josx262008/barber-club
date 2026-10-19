@@ -1,0 +1,41 @@
+Ctrl + ñ y escribe node src/app.js
+Servidor en http://localhost:3000 Esa terminal queda ocupada mientras el servidor corre, así que no la cierres.
+
+Pasa a Postman, pon http://localhost:3000/clientes con GET, dale Send y muestra el JSON con el 200 OK. Haz lo mismo con /citas.
+
+
+Abre una segunda terminal con el botón + de la zona de terminal, y escribe npm test. Salen las 3 pruebas en verde.
+
+
+
+
+
+
+Qué es JSONPlaceholder
+
+Es un servicio en internet que tiene datos inventados de prueba (usuarios, tareas, publicaciones). Está hecho para que los estudiantes practiquen sin tener que armar una base de datos. Cuando le pides /users, te devuelve una lista de 10 personas falsas (Leanne Graham, Clementine Bauch...). No son clientes reales de tu barbería.
+
+Qué hace tu código con ella
+
+Alguien abre localhost:3000/clientes (tu servidor).
+Tu servidor sale a internet y le pide /users a JSONPlaceholder.
+JSONPlaceholder le responde con la lista en JSON.
+Tu servidor le entrega esa lista a quien preguntó.
+
+Es como si le pidieras a un proveedor una lista de personas, y tú se la pasaras a quien te la pidió.
+
+Qué tiene que ver con tu barbería
+
+Hoy casi nada, y te lo digo sin rodeos. Por ahora esos datos falsos hacen el papel de los clientes y las citas, para que practiques cómo conectarte a una API y devolver JSON. Eso es lo que pide el Reto 1. Los datos reales de MVP Barber Club entran después:
+
+Reto 1: tu servidor trae datos de prueba de una API externa. Aquí estás ahora.
+Reto 2: guardas datos en tu propia base de datos y haces el CRUD completo (crear, leer, actualizar, borrar). Ahí ya registras clientes y citas reales de la barbería, y JSONPlaceholder deja de hacer falta.
+Reto 3: le agregas logs, seguridad y pruebas de integración.
+
+Además, lo que estás construyendo, /clientes y /citas, es tu propia API. Más adelante la web de la barbería (las pantallas) le va a pedir los datos a esa API, igual que tu servidor se los pide a JSONPlaceholder ahora. Por eso el proyecto crece por etapas.
+
+Para explicárselo MEJOR
+
+“Uso JSONPlaceholder como fuente de datos de prueba para clientes y citas mientras construyo la base de datos real de la barbería en el siguiente reto.”
+
+Eso es lo mismo que está en tu README, así que lo tienes cubierto.
