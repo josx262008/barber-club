@@ -2,6 +2,14 @@
 // en vez de crearlo adentro. Así, en las pruebas puedo pasarle un servicio
 // simulado (mock) sin llamar a la API real.
 
+
+
+// Aquí apliqué inyección de dependencias. El controlador no crea el
+// servicio por su cuenta, sino que lo recibe desde afuera como parámetro.
+// Lo hice así para que el controlador no quede pegado a la API real.
+// Gracias a eso, en las pruebas le puedo pasar un servicio falso y
+// probar todo sin necesitar internet.
+
 // Esta función fabrica el controlador y recibe el "servicio" como parámetro
 function crearControlador(servicio) {
   // Devuelvo un objeto con las dos funciones que atienden las rutas
