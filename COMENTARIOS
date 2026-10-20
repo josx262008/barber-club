@@ -4,7 +4,7 @@ Servidor en http://localhost:3000 Esa terminal queda ocupada mientras el servido
 Pasa a Postman, pon http://localhost:3000/clientes con GET, dale Send y muestra el JSON con el 200 OK. Haz lo mismo con /citas.
 
 
-Abre una segunda terminal con el botón + de la zona de terminal, y escribe npm test. Salen las 3 pruebas en verde.
+Abre una segunda terminal con el botón + de la zona de terminal, y escribe npm test , Salen las 3 pruebas en verde.
 
 
 
