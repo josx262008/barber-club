@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<!-- Le digo al navegador que este archivo es una página HTML5 -->
+<html lang="es">
+<!-- lang="es" indica que la página está en español -->
+<head>
+  <!-- Para que se vean bien las tildes y la ñ -->
+  <meta charset="UTF-8">
+  <!-- Para que la página se adapte al celular -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- El título que sale en la pestaña del navegador -->
+  <title>MVP Barber Club</title>
+  <!-- Conecto el archivo de estilos (colores y diseño) -->
+  <link rel="stylesheet" href="estilos.css">
+</head>
+<body>
+  <!-- Encabezado de la página -->
+  <header>
+    <h1>MVP Barber Club</h1>
+    <p>Clientes y citas</p>
+  </header>
+
+  <!-- Contenido principal -->
+  <main>
+    <!-- Sección de clientes -->
+    <section>
+      <h2>Clientes</h2>
+      <!-- Aquí el script va a poner las tarjetas de los clientes -->
+      <div id="clientes" class="lista">Cargando clientes...</div>
+    </section>
+
+    <!-- Sección de citas -->
+    <section>
+      <h2>Citas</h2>
+      <!-- Aquí el script va a poner las tarjetas de las citas -->
+      <div id="citas" class="lista">Cargando citas...</div>
+    </section>
+  </main>
+
+  <!-- Conecto el archivo con la lógica (lo que pide los datos a la API) -->
+  <script src="script.js"></script>
+</body>
+</html>

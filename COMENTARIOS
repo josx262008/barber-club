@@ -7,7 +7,51 @@ Pasa a Postman, pon http://localhost:3000/clientes con GET, dale Send y muestra 
 Abre una segunda terminal con el botón + de la zona de terminal, y escribe npm test , Salen las 3 pruebas en verde.
 
 
+La API. JSONPlaceholder: gratuita, sin registro, casi no falla. Sus usuarios hacen de clientes y sus tareas de citas, como datos de prueba mientras armo la base real en el Reto 2.
 
+
+BASE DE DATOS    Base de datos: SQLite (archivo barberia.sqlite), con el ORM TypeORM y el driver better-sqlite3
+
+
+ PARA CORRERLO "   node src/database/iniciar.js    "
+
+1. Qué instalamos y para qué
+
+typeorm es el ORM, el traductor que convierte tus clases en tablas.
+better-sqlite3 es el driver, la pieza que le permite hablar con SQLite. Primero probamos sqlite y falló porque esa versión de TypeORM ya solo acepta este nombre.
+reflect-metadata es una librería de apoyo que TypeORM necesita para funcionar.
+
+2. Las entidades (Cliente.js y Servicio.js)
+
+Cada archivo describe una tabla: el nombre y sus columnas. En Cliente, por ejemplo:
+
+id es la llave primaria y se genera sola (1, 2, 3...).
+nombre es texto obligatorio.
+telefono es texto, pero nullable, o sea que puede quedar vacío.
+
+Aquí no hay SQL, solo describes la tabla con código.
+
+3. La conexión (data-source.js)
+
+Es la configuración: qué tipo de base usas (better-sqlite3), en qué archivo se guarda (barberia.sqlite) y qué entidades debe crear. La línea más importante es synchronize: true, que le dice al ORM: “mira mis clases y crea o ajusta las tablas para que coincidan”.
+
+4. El arranque (iniciar.js)
+
+Llama a initialize(). En ese momento el ORM lee las entidades y crea las tablas en el archivo. Luego cierra la conexión con destroy(), porque este script solo sirve para eso.
+
+5. El resultado
+
+Se creó barberia.sqlite y con SQLite Viewer viste las dos tablas.
+
+La explicación en dos frases
+
+“Escribí las tablas como clases en JavaScript, y TypeORM las lee y las crea solo en SQLite gracias a synchronize: true, sin escribir CREATE TABLE. Así el modelo vive en el código y no tengo que mantener SQL aparte.”
+
+si synchronize: true se deja así en un sistema real, la respuesta honesta es que no: es cómodo para desarrollo, pero en producción puede borrar o cambiar datos sin avisar. Ahí se usan migraciones. Para el curso, como pide el PDF, está bien.
+
+
+
+Borra el archivo barberia.sqlite, corre otra vez node src/database/iniciar.js y mira cómo aparece de nuevo con las tablas. Es una buena demostración en vivo de que el ORM las crea solo.
 
 
 
@@ -24,9 +68,9 @@ Tu servidor le entrega esa lista a quien preguntó.
 
 Es como si le pidieras a un proveedor una lista de personas, y tú se la pasaras a quien te la pidió.
 
-Qué tiene que ver con tu barbería
+Qué tiene que ver con la  barbería
 
-Hoy casi nada, y te lo digo sin rodeos. Por ahora esos datos falsos hacen el papel de los clientes y las citas, para que practiques cómo conectarte a una API y devolver JSON. Eso es lo que pide el Reto 1. Los datos reales de MVP Barber Club entran después:
+ Por ahora esos datos falsos hacen el papel de los clientes y las citas, para que practiques cómo conectarte a una API y devolver JSON. Eso es lo que pide el Reto 1. Los datos reales de MVP Barber Club entran después:
 
 Reto 1: tu servidor trae datos de prueba de una API externa. Aquí estás ahora.
 Reto 2: guardas datos en tu propia base de datos y haces el CRUD completo (crear, leer, actualizar, borrar). Ahí ya registras clientes y citas reales de la barbería, y JSONPlaceholder deja de hacer falta.
@@ -39,3 +83,17 @@ Para explicárselo MEJOR
 “Uso JSONPlaceholder como fuente de datos de prueba para clientes y citas mientras construyo la base de datos real de la barbería en el siguiente reto.”
 
 Eso es lo mismo que está en tu README, así que lo tienes cubierto.
+
+
+
+
+
+
+
+
+Reto 1 (el que se entrega sin tablas)
+
+src/services/apiService.js: es el que sale a internet. Tiene dos funciones, obtenerClientes y obtenerCitas, que le piden los datos a JSONPlaceholder con axios y devuelven el JSON. Es como el mensajero que va a buscar la lista y la trae.
+src/controllers/controlador.js: es el que atiende lo que piden. Recibe el servicio desde afuera (la inyección de dependencias), le pide los datos y los devuelve como JSON. Si algo falla, no explota: responde con un error 500 y un mensaje claro. Es el barbero que atiende al cliente y usa la herramienta que le entregaron.
+src/app.js: es la puerta de entrada. Enciende el servidor en el puerto 3000, le entrega el servicio real al controlador y dice qué ruta hace qué: /clientes va a la función de clientes y /citas a la de citas.
+tests/pruebas.test.js: son las 3 pruebas. Usan servicios falsos para comprobar que el formato es correcto, que los errores se manejan bien y que el controlador funciona sin internet.

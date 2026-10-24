@@ -1,0 +1,68 @@
+/* Quito los márgenes que el navegador pone por defecto */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* Fondo oscuro y letra clara para toda la página */
+body {
+  font-family: Arial, sans-serif;
+  background: #121212;
+  color: #f2f2f2;
+}
+
+/* Encabezado: centrado, con una línea dorada abajo */
+header {
+  text-align: center;
+  padding: 32px 16px;
+  border-bottom: 3px solid #c9a24d;
+}
+
+/* El nombre de la barbería en dorado */
+header h1 { color: #c9a24d; font-size: 2rem; }
+
+/* El texto pequeño debajo del nombre, en gris */
+header p { color: #9a9a9a; margin-top: 6px; }
+
+/* Contenido principal con un ancho máximo y centrado */
+main { max-width: 1000px; margin: 0 auto; padding: 24px 16px; }
+
+/* Separación entre las dos secciones */
+section { margin-bottom: 40px; }
+
+/* Títulos de sección (Clientes, Citas) */
+h2 { color: #c9a24d; margin-bottom: 16px; }
+
+/* Las tarjetas se acomodan solas en columnas según el ancho de la pantalla */
+.lista {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+/* Cada tarjeta: fondo gris oscuro, bordes redondeados */
+.tarjeta {
+  background: #1e1e1e;
+  border: 1px solid #333;
+  border-radius: 10px;
+  padding: 16px;
+}
+
+/* Nombre o título dentro de la tarjeta */
+.tarjeta h3 { margin-bottom: 8px; font-size: 1.05rem; }
+
+/* Líneas de texto de la tarjeta, en gris claro */
+.tarjeta p { color: #bdbdbd; font-size: 0.9rem; margin-bottom: 4px; }
+
+/* Etiqueta pequeña con estado (Atendida o Pendiente) */
+.etiqueta {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: bold;
+}
+
+/* Etiqueta verde para las citas atendidas */
+.atendida { background: #1f4d2e; color: #7ee2a0; }
+
+/* Etiqueta dorada para las citas pendientes */
+.pendiente { background: #4d3d12; color: #e6c35c; }

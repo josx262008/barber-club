@@ -10,6 +10,12 @@ const app = express();
 // Aquí está la inyección: le entrego el servicio real al controlador
 const controlador = crearControlador(apiService);
 
+
+// Importo path, una herramienta de Node para armar rutas de carpetas
+const path = require('path');
+// Le digo a Express que muestre los archivos de la carpeta public (mi página web)
+app.use(express.static(path.join(__dirname, '..', 'public')));
+
 // Cuando pidan GET /clientes, ejecuta la función clientes del controlador
 app.get('/clientes', controlador.clientes);
 // Cuando pidan GET /citas, ejecuta la función citas del controlador
