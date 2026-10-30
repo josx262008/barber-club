@@ -1,3 +1,11 @@
+/* Etiqueta roja para las citas canceladas */
+.cancelada { background: #4d1f1f; color: #f08a8a; }
+
+/* Línea que dice de dónde vienen los datos */
+.fuente { color: #9a9a9a; font-size: 0.85rem; margin-bottom: 12px; }
+
+/* Enlace "Ver JSON" en dorado */
+.fuente a { color: #c9a24d; }
 /* Quito los márgenes que el navegador pone por defecto */
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -24,11 +32,17 @@ header p { color: #9a9a9a; margin-top: 6px; }
 /* Contenido principal con un ancho máximo y centrado */
 main { max-width: 1000px; margin: 0 auto; padding: 24px 16px; }
 
-/* Separación entre las dos secciones */
+/* Separación entre las secciones */
 section { margin-bottom: 40px; }
 
-/* Títulos de sección (Clientes, Citas) */
-h2 { color: #c9a24d; margin-bottom: 16px; }
+/* Títulos de sección (Servicios, Clientes, Citas) */
+h2 { color: #c9a24d; margin-bottom: 8px; }
+
+/* Línea que dice de dónde vienen los datos */
+.fuente { color: #9a9a9a; font-size: 0.85rem; margin-bottom: 12px; }
+
+/* Enlace "Ver JSON" en dorado */
+.fuente a { color: #c9a24d; }
 
 /* Las tarjetas se acomodan solas en columnas según el ancho de la pantalla */
 .lista {
@@ -51,7 +65,7 @@ h2 { color: #c9a24d; margin-bottom: 16px; }
 /* Líneas de texto de la tarjeta, en gris claro */
 .tarjeta p { color: #bdbdbd; font-size: 0.9rem; margin-bottom: 4px; }
 
-/* Etiqueta pequeña con estado (Atendida o Pendiente) */
+/* Etiqueta pequeña con estado */
 .etiqueta {
   display: inline-block;
   margin-top: 8px;
@@ -61,8 +75,24 @@ h2 { color: #c9a24d; margin-bottom: 16px; }
   font-weight: bold;
 }
 
-/* Etiqueta verde para las citas atendidas */
+/* Etiqueta verde para las citas confirmadas */
 .atendida { background: #1f4d2e; color: #7ee2a0; }
 
 /* Etiqueta dorada para las citas pendientes */
 .pendiente { background: #4d3d12; color: #e6c35c; }
+
+/* Etiqueta roja para las citas canceladas */
+.cancelada { background: #4d1f1f; color: #f08a8a; }
+
+/* Botón "Pedir cita" dentro de cada servicio */
+.boton-reservar {
+  display: inline-block;
+  margin-top: 12px;
+  background: #c9a24d;
+  color: #1a1405;
+  font-weight: bold;
+  text-decoration: none;
+  padding: 8px 18px;
+  border-radius: 20px;
+}
+.boton-reservar:hover { background: #e0b95f; }

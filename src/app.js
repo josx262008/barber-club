@@ -20,6 +20,7 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 app.get('/clientes', controlador.clientes);
 // Cuando pidan GET /citas, ejecuta la función citas del controlador
 app.get('/citas', controlador.citas);
+app.get('/servicios', controlador.servicios);
 
 // Enciendo el servidor en el puerto 3000 y muestro un mensaje en la terminal
 app.listen(3000, () => console.log('Servidor en http://localhost:3000'));
