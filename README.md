@@ -1,38 +1,56 @@
-# Barber Club - API REST & Base de Datos Local
+# Barber Club - API REST y Base de Datos Local
 
-Proyecto de aplicación web para la gestión administrativa de la barbería MVP Barber Club. El sistema combina el consumo de APIs externas para agendamiento con persistencia de datos local mediante **TypeORM** y **SQLite**, ofreciendo un flujo CRUD completo y arquitectura escalable.
+Proyecto de aplicación web para la gestión de la barbería MVP Barber Club. El sistema combina el consumo de APIs externas (Cal.com y JSONPlaceholder) con persistencia de datos local mediante **TypeORM** y **SQLite**, con un flujo CRUD completo.
 
 ---
 
-## 🛠️ Tecnologías e Infraestructura
+## Tecnologías e infraestructura
 - **Backend:** Node.js con Express.
-- **Base de Datos Local:** SQLite administrada a través de **TypeORM** (generación de esquemas y tablas sin SQL manual).
-- **Frontend:** Interfaz web interactiva estructurada en HTML5/CSS3 y manipulación dinámica del DOM con `fetch` API.
-- **Integraciones Externas:** Consumo de la API de Cal.com (servicios y citas) y JSONPlaceholder (clientes de prueba).
+- **Base de datos local:** SQLite administrada con **TypeORM**. Las tablas las crea el ORM a partir de las entidades (synchronize: true), sin SQL manual.
+- **Frontend:** interfaz web en HTML5, CSS3 y JavaScript, con la API fetch para hablar con el servidor.
+- **Integraciones externas:** API de Cal.com (servicios y citas) y JSONPlaceholder (clientes de prueba y envío de reservas).
 
 ---
 
-## 🚀 Endpoints e Interfaz de Aplicaciones (API REST)
+## Cómo ejecutarlo
+1. Instalar las librerías: npm install
+2. Crear un archivo .env en la raíz con la clave de Cal.com: CAL_API_KEY=tu_clave
+3. Encender el servidor: node src/app.js
+4. Abrir http://localhost:3000
 
-### 1. Servicios Externos (Reto 1)
-- `GET /servicios`: Consulta y retorna la lista de servicios agendables desde la API de Cal.com.
-- `GET /citas`: Obtiene la lista de citas programadas desde la plataforma Cal.com.
-- `GET /clientes`: Retorna datos sintéticos de prueba obtenidos desde JSONPlaceholder.
-
-### 2. Persistencia y CRUD Local (Reto 2)
-- **Gestión de Servicios Locales (`/servicios-locales`):**
-  - `GET /servicios-locales`: Consulta todos los servicios guardados localmente en SQLite.
-  - `POST /servicios-locales`: Crea un nuevo servicio local formateando el precio.
-  - `PUT /servicios-locales/:id`: Actualiza los datos de un servicio mediante su identificador único.
-  - `DELETE /servicios-locales/:id`: Elimina un registro de servicio de la base de datos local.
-
-- **Gestión de Clientes y Reservas (`/clientes-locales`, `/reservas`):**
-  - `GET /reservas` / `POST /reservas`: Operaciones de consulta y agendamiento local.
-  - `PUT /reservas/:id` / `DELETE /reservas/:id`: Actualización y cancelación de citas guardadas en SQLite.
+## Cómo ejecutar las pruebas
+npm test
 
 ---
 
-## 📊 Diagrama de Flujo del Sistema
+## Endpoints (API REST)
+
+### 1. Servicios externos (Reto 1)
+- `GET /servicios`: lista de servicios agendables desde la API de Cal.com.
+- `GET /citas`: citas programadas desde Cal.com.
+- `GET /clientes`: clientes de prueba obtenidos desde JSONPlaceholder.
+
+### 2. Persistencia y CRUD local (Reto 2)
+- **CRUD de reservas (entidad Cita):**
+  - `POST /reservas`: valida los datos, guarda en SQLite y envía la reserva a una API externa. Responde 201 con la reserva y su id.
+  - `GET /reservas`: lista todas las reservas.
+  - `GET /reservas/:id`: busca una reserva por su id (404 si no existe).
+  - `PUT /reservas/:id`: modifica una reserva y la devuelve (404 si no existe).
+  - `DELETE /reservas/:id`: elimina una reserva y confirma (404 si no existe).
+- **Servicios locales (`/servicios-locales`):** GET, POST, PUT y DELETE sobre la tabla de servicios.
+- **Clientes locales (`/clientes-locales`):** GET, POST, PUT y DELETE sobre la tabla de clientes.
+
+---
+
+## Envío a una API externa
+Al crear una reserva (`POST /reservas`), la aplicación la guarda en la base de datos con TypeORM y después la envía con POST a JSONPlaceholder (https://jsonplaceholder.typicode.com/posts). La respuesta incluye el estado del envío. Si la API externa falla, la reserva igual queda guardada.
+
+## Inyección de dependencias
+Los controladores no crean sus servicios: los reciben desde afuera. Así, en las pruebas se les pasa un servicio simulado (mock) y se prueba sin internet ni base de datos.
+
+---
+
+## Diagrama de flujo del sistema
 
 ```mermaid
 flowchart TD
@@ -61,12 +79,12 @@ flowchart TD
     UI -->|GET /servicios| API_Routes
     UI -->|GET /citas| API_Routes
     UI -->|GET /clientes| API_Routes
-    
+
     API_Routes --> Ctrl_Ext
     Ctrl_Ext -->|Consulta Cal.com| Cal
     Ctrl_Ext -->|Consulta JSONPlaceholder| JSONP
 
-    %% Flujos CRUD Local (POST / PUT / DELETE)
+    %% Flujos CRUD local (POST / PUT / DELETE)
     UI -->|GET/POST/PUT/DELETE /servicios-locales| API_Routes
     UI -->|GET/POST/PUT/DELETE /clientes-locales| API_Routes
     UI -->|POST /reservas| Form
@@ -74,6 +92,10 @@ flowchart TD
 
     API_Routes --> Ctrl_Res
     API_Routes --> ORM
-    
+
     ORM -->|Guarda / Modifica / Elimina| DB
     DB -->|Retorna Datos SQLite| ORM
+
+    %% Envío a la API externa después de guardar la reserva
+    Ctrl_Res -->|Envía la reserva guardada POST /posts| JSONP
+```

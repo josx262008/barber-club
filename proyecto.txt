@@ -1,0 +1,1284 @@
+﻿===== src\app.js =====
+const express = require('express');
+const path = require('path');
+// Servicios: APIs externas (Reto 1), base de datos y notificador (Reto 2)
+const apiService = require('./services/apiService');
+const reservaService = require('./services/reservaService');
+const notificadorService = require('./services/notificadorService');
+// FÃ¡bricas de controladores
+const crearControlador = require('./controllers/controlador');
+const crearReservaControlador = require('./controllers/reservaControlador');
+const AppDataSource = require('./database/data-source');
+
+const app = express();
+// InyecciÃ³n de dependencias
+const controlador = crearControlador(apiService);
+const reservas = crearReservaControlador(reservaService, notificadorService);
+
+// Entiende JSON en el cuerpo de las peticiones y muestra la pÃ¡gina de public
+app.use(express.json());
+app.use(express.static(path.join(__dirname, '..', 'public')));
+
+// Reto 1: datos de las APIs externas
+app.get('/clientes', controlador.clientes);
+app.get('/citas', controlador.citas);
+app.get('/servicios', controlador.servicios);
+
+// Reto 2: CRUD de reservas en mi base de datos
+app.post('/reservas', reservas.crear);
+app.get('/reservas', reservas.listar);
+app.get('/reservas/:id', reservas.obtener);
+app.put('/reservas/:id', reservas.actualizar);
+app.delete('/reservas/:id', reservas.eliminar);
+
+// --- CLIENTES LOCALES ---
+app.get('/clientes-locales', async (req, res) => {
+  try {
+    const clienteRepo = AppDataSource.getRepository('Cliente');
+    const clientesLocales = await clienteRepo.find();
+    res.json(clientesLocales);
+  } catch (error) {
+    console.error('Error al obtener clientes locales:', error);
+    res.status(500).json({ error: 'Error al obtener clientes locales' });
+  }
+});
+
+app.post('/clientes-locales', async (req, res) => {
+  try {
+    const clienteRepo = AppDataSource.getRepository('Cliente');
+    const nuevoCliente = clienteRepo.create(req.body);
+    const resultado = await clienteRepo.save(nuevoCliente);
+    res.status(201).json(resultado);
+  } catch (error) {
+    console.error('Error al crear cliente local:', error);
+    res.status(500).json({ error: 'Error al crear cliente local' });
+  }
+});
+
+app.put('/clientes-locales/:id', async (req, res) => {
+  try {
+    const repo = AppDataSource.getRepository('Cliente');
+    await repo.update(req.params.id, req.body);
+    res.json({ mensaje: 'Cliente actualizado con Ã©xito' });
+  } catch (error) {
+    res.status(500).json({ error: 'Error al actualizar cliente' });
+  }
+});
+
+app.delete('/clientes-locales/:id', async (req, res) => {
+  try {
+    const repo = AppDataSource.getRepository('Cliente');
+    await repo.delete(req.params.id);
+    res.json({ mensaje: 'Cliente eliminado con Ã©xito' });
+  } catch (error) {
+    res.status(500).json({ error: 'Error al eliminar cliente' });
+  }
+});
+
+// --- SERVICIOS LOCALES ---
+app.get('/servicios-locales', async (req, res) => {
+  try {
+    const servicioRepo = AppDataSource.getRepository('Servicio');
+    const serviciosLocales = await servicioRepo.find();
+    res.json(serviciosLocales);
+  } catch (error) {
+    console.error('Error al obtener servicios locales:', error);
+    res.status(500).json({ error: 'Error al obtener servicios locales' });
+  }
+});
+
+app.post('/servicios-locales', async (req, res) => {
+  try {
+    const servicioRepo = AppDataSource.getRepository('Servicio');
+    const nuevoServicio = servicioRepo.create(req.body);
+    const resultado = await servicioRepo.save(nuevoServicio);
+    res.status(201).json(resultado);
+  } catch (error) {
+    console.error('Error al crear servicio local:', error);
+    res.status(500).json({ error: 'Error al crear servicio local' });
+  }
+});
+
+app.put('/servicios-locales/:id', async (req, res) => {
+  try {
+    const repo = AppDataSource.getRepository('Servicio');
+    await repo.update(req.params.id, req.body);
+    res.json({ mensaje: 'Servicio actualizado con Ã©xito' });
+  } catch (error) {
+    console.error('Error al actualizar servicio:', error);
+    res.status(500).json({ error: 'Error al actualizar servicio' });
+  }
+});
+
+app.delete('/servicios-locales/:id', async (req, res) => {
+  try {
+    const repo = AppDataSource.getRepository('Servicio');
+    await repo.delete(req.params.id);
+    res.json({ mensaje: 'Servicio eliminado con Ã©xito' });
+  } catch (error) {
+    console.error('Error al eliminar servicio:', error);
+    res.status(500).json({ error: 'Error al eliminar servicio' });
+  }
+});
+
+// Conecto la base de datos y enciendo el servidor
+AppDataSource.initialize()
+  .then(() => app.listen(3000, () => console.log('Servidor en http://localhost:3000')))
+  .catch((error) => console.error('No se pudo conectar a la base de datos:', error));
+
+===== src\controllers\controlador.js =====
+// InyecciÃ³n de dependencias: el controlador no crea su propio servicio,
+// lo recibe como parÃ¡metro desde afuera. Lo hice asÃ­ para que el controlador
+// no quede pegado a la API real, y en las pruebas pueda pasarle un servicio
+// falso (mock) sin conectarme a internet.
+
+
+
+// FÃ¡brica del controlador: recibe el servicio (real o falso en las pruebas)
+function crearControlador(servicio) {
+  return {
+    // Se ejecuta cuando alguien pide /clientes
+    clientes: async (req, res) => {
+      try {
+        const datos = await servicio.obtenerClientes();
+        res.json(datos);
+      } catch (error) {
+        console.error('Error en /clientes:', error.message);
+        res.status(500).json({ error: 'No se pudieron obtener los clientes' });
+      }
+    },
+
+    // Se ejecuta cuando alguien pide /servicios
+    servicios: async (req, res) => {
+      try {
+        const datos = await servicio.obtenerServicios();
+        res.json(datos);
+      } catch (error) {
+        console.error('Error en /servicios:', error.message);
+        res.status(500).json({ error: 'No se pudieron obtener los servicios' });
+      }
+    },
+
+    // Se ejecuta cuando alguien pide /citas
+    citas: async (req, res) => {
+      try {
+        const datos = await servicio.obtenerCitas();
+        res.json(datos);
+      } catch (error) {
+        console.error('Error en /citas:', error.message);
+        res.status(500).json({ error: 'No se pudieron obtener las citas' });
+      }
+    }
+  };
+}
+
+module.exports = crearControlador;
+
+===== src\controllers\reservaControlador.js =====
+// Estados permitidos para una reserva
+const ESTADOS = ['pendiente', 'confirmada', 'atendida', 'cancelada'];
+
+// Toma solo los campos permitidos del cuerpo y les quita espacios
+function limpiar(cuerpo) {
+  const datos = {};
+  ['clienteNombre', 'telefono', 'servicio', 'fechaHora', 'estado'].forEach((campo) => {
+    if (typeof cuerpo[campo] === 'string') datos[campo] = cuerpo[campo].trim();
+  });
+  return datos;
+}
+
+// Devuelve un mensaje de error o null; completo = true exige los obligatorios (crear)
+function validar(datos, completo) {
+  if (completo) {
+    for (const campo of ['clienteNombre', 'servicio', 'fechaHora']) {
+      if (!datos[campo]) return 'Falta el campo obligatorio: ' + campo;
+    }
+  }
+  for (const campo of ['clienteNombre', 'servicio', 'fechaHora']) {
+    if (campo in datos && !datos[campo]) return 'El campo ' + campo + ' no puede estar vacÃ­o';
+  }
+  if (datos.estado && !ESTADOS.includes(datos.estado)) {
+    return 'Estado no vÃ¡lido. Usa: ' + ESTADOS.join(', ');
+  }
+  return null;
+}
+
+// InyecciÃ³n de dependencias: recibe el servicio de la base y el notificador desde afuera
+function crearReservaControlador(servicio, notificador) {
+  return {
+    // POST /reservas: guarda en la base y luego envÃ­a a la API externa
+    crear: async (req, res) => {
+      try {
+        const datos = limpiar(req.body || {});
+        const error = validar(datos, true);
+        if (error) return res.status(400).json({ error });
+        // Paso 1: guardo en la base de datos
+        const reserva = await servicio.crear(datos);
+        // Paso 2: envÃ­o a la API externa; si falla, la reserva igual queda guardada
+        let notificacion = 'no enviada';
+        try {
+          const externo = await notificador.notificar(reserva);
+          notificacion = 'enviada (id externo ' + externo.id + ')';
+        } catch (e) {
+          console.error('No se pudo notificar a la API externa:', e.message);
+        }
+        res.status(201).json({ ...reserva, notificacion });
+      } catch (error) {
+        console.error('Error en POST /reservas:', error.message);
+        res.status(500).json({ error: 'No se pudo crear la reserva' });
+      }
+    },
+
+    // GET /reservas: todas
+    listar: async (req, res) => {
+      try { res.json(await servicio.listar()); }
+      catch (error) {
+        console.error('Error en GET /reservas:', error.message);
+        res.status(500).json({ error: 'No se pudieron obtener las reservas' });
+      }
+    },
+
+    // GET /reservas/:id: una por id (404 si no existe)
+    obtener: async (req, res) => {
+      try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id)) return res.status(400).json({ error: 'El id debe ser un nÃºmero' });
+        const reserva = await servicio.obtener(id);
+        if (!reserva) return res.status(404).json({ error: 'Reserva no encontrada' });
+        res.json(reserva);
+      } catch (error) {
+        console.error('Error en GET /reservas/:id:', error.message);
+        res.status(500).json({ error: 'No se pudo obtener la reserva' });
+      }
+    },
+
+    // PUT /reservas/:id: modifica (404 si no existe)
+    actualizar: async (req, res) => {
+      try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id)) return res.status(400).json({ error: 'El id debe ser un nÃºmero' });
+        const datos = limpiar(req.body || {});
+        const error = validar(datos, false);
+        if (error) return res.status(400).json({ error });
+        const reserva = await servicio.actualizar(id, datos);
+        if (!reserva) return res.status(404).json({ error: 'Reserva no encontrada' });
+        res.json(reserva);
+      } catch (error) {
+        console.error('Error en PUT /reservas/:id:', error.message);
+        res.status(500).json({ error: 'No se pudo actualizar la reserva' });
+      }
+    },
+
+    // DELETE /reservas/:id: elimina y confirma (404 si no existe)
+    eliminar: async (req, res) => {
+      try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id)) return res.status(400).json({ error: 'El id debe ser un nÃºmero' });
+        const reserva = await servicio.eliminar(id);
+        if (!reserva) return res.status(404).json({ error: 'Reserva no encontrada' });
+        res.json({ mensaje: 'Reserva eliminada', id });
+      } catch (error) {
+        console.error('Error en DELETE /reservas/:id:', error.message);
+        res.status(500).json({ error: 'No se pudo eliminar la reserva' });
+      }
+    }
+  };
+}
+
+module.exports = crearReservaControlador;
+
+===== src\database\data-source.js =====
+// reflect-metadata es una librerÃ­a que TypeORM necesita para funcionar
+require('reflect-metadata');
+// Importo DataSource, la clase que maneja la conexiÃ³n a la base de datos
+const { DataSource } = require('typeorm');
+// Importo las descripciones de las tablas que creÃ©
+const Cliente = require('../entities/Cliente');
+const Servicio = require('../entities/Servicio');
+const Cita = require('../entities/Cita');
+
+// Creo la conexiÃ³n con su configuraciÃ³n
+const AppDataSource = new DataSource({
+  // Tipo de base de datos que uso: SQLite
+  type: 'better-sqlite3',
+  // Nombre del archivo donde se va a guardar la base de datos
+  database: 'barberia.sqlite',
+  // synchronize: true hace que el ORM cree las tablas solo, sin CREATE TABLE
+  synchronize: true,
+  // Lista de tablas que el ORM debe crear
+  entities: [Cliente, Servicio, Cita]
+});
+
+// Exporto la conexiÃ³n para usarla en otros archivos
+module.exports = AppDataSource;
+
+===== src\database\iniciar.js =====
+// Importo la conexiÃ³n que configurÃ© en data-source.js
+const AppDataSource = require('./data-source');
+
+// initialize() enciende la conexiÃ³n; en ese momento el ORM crea las tablas
+AppDataSource.initialize()
+  // .then se ejecuta si todo saliÃ³ bien
+  .then(async () => {
+    // Muestro un mensaje en la terminal para confirmar
+    console.log('Base de datos lista, tablas creadas por el ORM');
+    // Cierro la conexiÃ³n porque este script solo sirve para crear las tablas
+    await AppDataSource.destroy();
+  })
+  // .catch se ejecuta si algo fallÃ³, y muestra el error en la terminal
+  .catch((error) => console.error('Error al conectar:', error));
+
+===== src\entities\Cita.js =====
+// Importo EntitySchema para describir la tabla
+const { EntitySchema } = require('typeorm');
+
+// Exporto la descripciÃ³n de la tabla citas (las reservas de la barberÃ­a)
+module.exports = new EntitySchema({
+  // Nombre interno de la entidad
+  name: 'Cita',
+  // Nombre que tendrÃ¡ la tabla en la base de datos
+  tableName: 'citas',
+  // Columnas de la tabla
+  columns: {
+    // id: nÃºmero Ãºnico, llave primaria, generado automÃ¡ticamente
+    id: { type: Number, primary: true, generated: true },
+    // clienteNombre: nombre de quien aparta la cita (obligatorio)
+    clienteNombre: { type: String },
+    // telefono: telÃ©fono del cliente; nullable = puede quedar vacÃ­o
+    telefono: { type: String, nullable: true },
+    // servicio: quÃ© se va a hacer, por ejemplo "Corte de cabello" (obligatorio)
+    servicio: { type: String },
+    // fechaHora: fecha y hora de la cita, guardada como texto (obligatorio)
+    fechaHora: { type: String },
+    // estado: cÃ³mo va la cita; si no se dice nada, queda como "pendiente"
+    estado: { type: String, default: 'pendiente' }
+  }
+});
+
+===== src\entities\Cliente.js =====
+// Importo EntitySchema, la herramienta de TypeORM para describir una tabla
+const { EntitySchema } = require('typeorm');
+
+// Exporto la descripciÃ³n de la tabla para usarla en otros archivos
+module.exports = new EntitySchema({
+  // Nombre interno de la entidad (la "clase" en mi cÃ³digo)
+  name: 'Cliente',
+  // Nombre real que va a tener la tabla en la base de datos
+  tableName: 'clientes',
+  // AquÃ­ van las columnas de la tabla
+  columns: {
+    // id: nÃºmero Ãºnico de cada cliente; primary = es la llave primaria (PK)
+    // generated = la base de datos lo asigna sola (1, 2, 3...)
+    id: { type: Number, primary: true, generated: true },
+    // nombre: texto, y es obligatorio
+    nombre: { type: String },
+    // telefono: texto; nullable = puede quedar vacÃ­o si no se tiene
+    telefono: { type: String, nullable: true }
+  }
+});
+
+===== src\entities\Servicio.js =====
+// Importo EntitySchema para describir la tabla
+const { EntitySchema } = require('typeorm');
+
+// Exporto la descripciÃ³n de la tabla servicios
+module.exports = new EntitySchema({
+  // Nombre interno de la entidad
+  name: 'Servicio',
+  // Nombre que tendrÃ¡ la tabla en la base de datos
+  tableName: 'servicios',
+  // Columnas de la tabla
+  columns: {
+    // id: nÃºmero Ãºnico, llave primaria, generado automÃ¡ticamente
+    id: { type: Number, primary: true, generated: true },
+    // nombre del servicio, por ejemplo "Corte de cabello"
+    nombre: { type: String },
+    // precio del servicio; 'float' guarda nÃºmeros con decimales
+    precio: { type: 'float' },
+    // activo: true si el servicio se sigue ofreciendo; por defecto es true
+    activo: { type: Boolean, default: true }
+  }
+});
+
+===== src\services\apiService.js =====
+// Cargo las variables del archivo .env (ahÃ­ estÃ¡ mi clave de Cal.com, fuera del cÃ³digo)
+require('dotenv').config();
+// Importo axios, la librerÃ­a que me deja hacer peticiones a internet
+const axios = require('axios');
+
+// DirecciÃ³n base de JSONPlaceholder, la API de datos de prueba que uso para los clientes
+const URL_BASE = 'https://jsonplaceholder.typicode.com';
+// DirecciÃ³n base de la API de Cal.com, que uso para los servicios y las citas
+const URL_CAL = 'https://api.cal.com/v2';
+
+// FunciÃ³n que arma los encabezados que Cal.com exige; recibe la versiÃ³n de la API a usar
+function encabezadosCal(version) {
+  // Devuelvo un objeto con los dos encabezados
+  return {
+    // Authorization: aquÃ­ va mi clave. "Bearer" es la forma en que Cal.com espera recibirla,
+    // y process.env.CAL_API_KEY es el valor guardado en el archivo .env
+    Authorization: 'Bearer ' + process.env.CAL_API_KEY,
+    // cal-api-version: le digo a Cal.com quÃ© versiÃ³n de su API quiero usar
+    'cal-api-version': version
+  };
+}
+
+// FunciÃ³n que trae la lista de clientes de prueba
+// async porque pedir datos por internet tarda y la funciÃ³n tiene que esperar
+async function obtenerClientes() {
+  // await = espera a que JSONPlaceholder responda; pido /users y no mando clave porque no la pide
+  const respuesta = await axios.get(`${URL_BASE}/users`);
+  // respuesta.data es el JSON con los datos; eso es lo que devuelvo
+  return respuesta.data;
+}
+
+// FunciÃ³n que trae los servicios de la barberÃ­a (los tipos de evento de Cal.com)
+async function obtenerServicios() {
+  // Pido /event-types a Cal.com y le mando los encabezados con mi clave y la versiÃ³n 2024-06-14
+  const respuesta = await axios.get(`${URL_CAL}/event-types`, { headers: encabezadosCal('2024-06-14') });
+  // Cal.com mete la lista dentro de un campo llamado "data"; la guardo en esta variable
+  const datos = respuesta.data.data;
+  // Si lo que llegÃ³ es una lista la devuelvo; si no, devuelvo una lista vacÃ­a para no romper la pÃ¡gina
+  return Array.isArray(datos) ? datos : [];
+}
+
+// FunciÃ³n que trae las citas apartadas (las reservas de Cal.com)
+async function obtenerCitas() {
+  // Pido /bookings a Cal.com con mi clave; esta ruta pide la versiÃ³n 2026-05-01
+  const respuesta = await axios.get(`${URL_CAL}/bookings`, { headers: encabezadosCal('2026-05-01') });
+  // La lista de reservas tambiÃ©n viene dentro del campo "data"
+  const datos = respuesta.data.data;
+  // Devuelvo la lista, o una vacÃ­a si no llegÃ³ una lista
+  return Array.isArray(datos) ? datos : [];
+}
+
+// Exporto las tres funciones para usarlas en otros archivos (el controlador y las pruebas)
+module.exports = { obtenerClientes, obtenerServicios, obtenerCitas };
+
+===== src\services\notificadorService.js =====
+// Importo axios para hacer peticiones a internet
+const axios = require('axios');
+
+// DirecciÃ³n base de la API externa (JSONPlaceholder acepta POST de prÃ¡ctica)
+const URL_BASE = 'https://jsonplaceholder.typicode.com';
+
+// EnvÃ­a los datos de la reserva a la API externa y devuelve su respuesta
+async function notificar(reserva) {
+  const respuesta = await axios.post(`${URL_BASE}/posts`, {
+    title: 'Nueva reserva #' + reserva.id,
+    body: reserva.clienteNombre + ' - ' + reserva.servicio + ' - ' + reserva.fechaHora,
+    userId: 1
+  });
+  // La API devuelve el registro con un id nuevo; mi controlador lo muestra
+  return respuesta.data;
+}
+
+module.exports = { notificar };
+
+===== src\services\reservaService.js =====
+// ConexiÃ³n a la base de datos y descripciÃ³n de la tabla citas
+const AppDataSource = require('../database/data-source');
+const Cita = require('../entities/Cita');
+
+// Repositorio: la herramienta del ORM para leer y guardar filas
+function repo() { return AppDataSource.getRepository(Cita); }
+
+// READ (todos)
+async function listar() { return repo().find({ order: { id: 'ASC' } }); }
+
+// READ (uno por id); devuelve null si no existe
+async function obtener(id) { return repo().findOneBy({ id }); }
+
+// CREATE: arma la fila y la guarda; devuelve la fila con su id
+async function crear(datos) { return repo().save(repo().create(datos)); }
+
+// UPDATE: busca, cambia solo lo recibido y guarda; null si no existe
+async function actualizar(id, datos) {
+  const cita = await repo().findOneBy({ id });
+  if (!cita) return null;
+  repo().merge(cita, datos);
+  return repo().save(cita);
+}
+
+// DELETE: busca y borra; null si no existe
+async function eliminar(id) {
+  const cita = await repo().findOneBy({ id });
+  if (!cita) return null;
+  const copia = { ...cita };
+  await repo().remove(cita);
+  return copia;
+}
+
+module.exports = { listar, obtener, crear, actualizar, eliminar };
+
+===== tests\pruebas.test.js =====
+// Importo axios para poder simularlo (mock)
+const axios = require('axios');
+// Importo el servicio real, que es lo que voy a probar en la prueba 1
+const apiService = require('../src/services/apiService');
+// Importo la funciÃ³n que fabrica el controlador
+const crearControlador = require('../src/controllers/controlador');
+
+// Le digo a Jest: reemplaza axios por una versiÃ³n falsa, asÃ­ no se llama a internet
+jest.mock('axios');
+
+// Creo una respuesta falsa de Express para poder revisar quÃ© devuelve el controlador
+function crearRes() {
+  // Objeto vacÃ­o que harÃ¡ de "res"
+  const res = {};
+  // jest.fn() es una funciÃ³n espÃ­a: anota si la llamaron y con quÃ©
+  // mockReturnValue(res) hace que devuelva el mismo objeto, para poder encadenar
+  res.json = jest.fn().mockReturnValue(res);
+  res.status = jest.fn().mockReturnValue(res);
+  // Devuelvo el res falso
+  return res;
+}
+
+// Prueba 1: el formato de los datos es correcto
+// test('nombre', funciÃ³n) define una prueba
+test('obtenerClientes retorna un array con campo id', async () => {
+  // Le digo a axios falso que responda con una lista con una persona inventada
+  axios.get.mockResolvedValue({ data: [{ id: 1, name: 'Ana' }] });
+  // Llamo a la funciÃ³n real del servicio, que usarÃ¡ el axios falso
+  const datos = await apiService.obtenerClientes();
+  // expect = "espero que": reviso que lo devuelto sea un array
+  expect(Array.isArray(datos)).toBe(true);
+  // Reviso que el primer elemento tenga el campo id
+  expect(datos[0]).toHaveProperty('id');
+});
+
+// Prueba 2: manejo de errores
+test('el controlador devuelve un error claro cuando la API falla', async () => {
+  // Creo un servicio falso que siempre falla, simulando que la API se cayÃ³
+  const servicioFalso = {
+    obtenerClientes: jest.fn().mockRejectedValue(new Error('API caÃ­da'))
+  };
+  // InyecciÃ³n: le entrego el servicio falso al controlador
+  const controlador = crearControlador(servicioFalso);
+  // Creo el res falso para espiar la respuesta
+  const res = crearRes();
+  // Ejecuto la funciÃ³n del controlador (req vacÃ­o porque no lo uso)
+  await controlador.clientes({}, res);
+  // Reviso que respondiÃ³ con cÃ³digo 500
+  expect(res.status).toHaveBeenCalledWith(500);
+  // Reviso que mandÃ³ el mensaje de error claro
+  expect(res.json).toHaveBeenCalledWith({ error: 'No se pudieron obtener los clientes' });
+});
+
+// Prueba 3: el controlador funciona con un servicio simulado
+test('el controlador funciona con un servicio simulado', async () => {
+  // Datos inventados que devolverÃ¡ el servicio falso
+  const datosFalsos = [{ id: 1, title: 'Cita de prueba' }];
+  // Servicio falso que responde bien con esos datos
+  const servicioFalso = {
+    obtenerCitas: jest.fn().mockResolvedValue(datosFalsos)
+  };
+  // InyecciÃ³n: le paso el servicio falso en lugar del real
+  const controlador = crearControlador(servicioFalso);
+  // Creo el res falso
+  const res = crearRes();
+  // Ejecuto la funciÃ³n citas del controlador
+  await controlador.citas({}, res);
+  // Reviso que el controlador respondiÃ³ exactamente con esos datos
+  expect(res.json).toHaveBeenCalledWith(datosFalsos);
+});
+
+===== public\estilos.css =====
+/* Etiqueta roja para las citas canceladas */
+.cancelada { background: #4d1f1f; color: #f08a8a; }
+
+/* LÃ­nea que dice de dÃ³nde vienen los datos */
+.fuente { color: #9a9a9a; font-size: 0.85rem; margin-bottom: 12px; }
+
+/* Enlace "Ver JSON" en dorado */
+.fuente a { color: #c9a24d; }
+/* Quito los mÃ¡rgenes que el navegador pone por defecto */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* Fondo oscuro y letra clara para toda la pÃ¡gina */
+body {
+  font-family: Arial, sans-serif;
+  background: #121212;
+  color: #f2f2f2;
+}
+
+/* Encabezado: centrado, con una lÃ­nea dorada abajo */
+header {
+  text-align: center;
+  padding: 32px 16px;
+  border-bottom: 3px solid #c9a24d;
+}
+
+/* El nombre de la barberÃ­a en dorado */
+header h1 { color: #c9a24d; font-size: 2rem; }
+
+/* El texto pequeÃ±o debajo del nombre, en gris */
+header p { color: #9a9a9a; margin-top: 6px; }
+
+/* Contenido principal con un ancho mÃ¡ximo y centrado */
+main { max-width: 1000px; margin: 0 auto; padding: 24px 16px; }
+
+/* SeparaciÃ³n entre las secciones */
+section { margin-bottom: 40px; }
+
+/* TÃ­tulos de secciÃ³n (Servicios, Clientes, Citas) */
+h2 { color: #c9a24d; margin-bottom: 8px; }
+
+/* LÃ­nea que dice de dÃ³nde vienen los datos */
+.fuente { color: #9a9a9a; font-size: 0.85rem; margin-bottom: 12px; }
+
+/* Enlace "Ver JSON" en dorado */
+.fuente a { color: #c9a24d; }
+
+/* Las tarjetas se acomodan solas en columnas segÃºn el ancho de la pantalla */
+.lista {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+/* Cada tarjeta: fondo gris oscuro, bordes redondeados */
+.tarjeta {
+  background: #1e1e1e;
+  border: 1px solid #333;
+  border-radius: 10px;
+  padding: 16px;
+}
+
+/* Nombre o tÃ­tulo dentro de la tarjeta */
+.tarjeta h3 { margin-bottom: 8px; font-size: 1.05rem; }
+
+/* LÃ­neas de texto de la tarjeta, en gris claro */
+.tarjeta p { color: #bdbdbd; font-size: 0.9rem; margin-bottom: 4px; }
+
+/* Etiqueta pequeÃ±a con estado */
+.etiqueta {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: bold;
+}
+
+/* Etiqueta verde para las citas confirmadas */
+.atendida { background: #1f4d2e; color: #7ee2a0; }
+
+/* Etiqueta dorada para las citas pendientes */
+.pendiente { background: #4d3d12; color: #e6c35c; }
+
+/* Etiqueta roja para las citas canceladas */
+.cancelada { background: #4d1f1f; color: #f08a8a; }
+
+/* BotÃ³n "Pedir cita" dentro de cada servicio */
+.boton-reservar {
+  display: inline-block;
+  margin-top: 12px;
+  background: #c9a24d;
+  color: #1a1405;
+  font-weight: bold;
+  text-decoration: none;
+  padding: 8px 18px;
+  border-radius: 20px;
+}
+.boton-reservar:hover { background: #e0b95f; }
+
+===== public\index.html =====
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MVP Barber Club</title>
+  <link rel="stylesheet" href="estilos.css">
+  <style>
+    /* Estilos estÃ©ticos para los paneles de administraciÃ³n y formularios en la interfaz */
+    .panel-admin { background: #f4f4f4; padding: 15px; margin-bottom: 15px; border-radius: 8px; border: 1px solid #ddd; }
+    .panel-admin input, .panel-admin select { padding: 8px; margin-right: 5px; margin-bottom: 5px; width: 200px; }
+    .panel-admin button { padding: 8px 12px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    .panel-admin button:hover { background: #0056b3; }
+    .btn-refrescar { background: #28a745; margin-bottom: 10px; }
+    .btn-refrescar:hover { background: #218838; }
+    .btn-accion { background: #ffc107; border: none; padding: 4px 8px; margin-left: 5px; cursor: pointer; border-radius: 3px; font-size: 12px; }
+    .btn-eliminar { background: #dc3545; color: white; }
+  </style>
+</head>
+<body>
+  <!-- Encabezado principal de la aplicaciÃ³n web -->
+  <header>
+    <h1>MVP Barber Club</h1>
+    <p>Servicios, clientes y citas (GestiÃ³n Profesional)</p>
+  </header>
+
+  <main>
+    <!-- SECCIÃ“N DE SERVICIOS: Solo el administrador define precios y servicios -->
+    <section>
+      <h2>Servicios</h2>
+      <p class="fuente"><span id="fuente-servicios">Fuente: GET /servicios</span></p>
+      
+      <!-- Panel con el botÃ³n de actualizar y el formulario exclusivo del administrador -->
+      <div class="panel-admin">
+        <button class="btn-refrescar" onclick="cargarServicios()">ðŸ”„ Actualizar Servicios</button>
+        <form id="form-servicio" style="display:inline-block; margin-left:10px;" onsubmit="agregarServicio(event)">
+          <input type="text" id="nombreServicio" placeholder="Nombre del servicio" required />
+          <input type="number" id="precioServicio" placeholder="Precio ($)" required />
+          <button type="submit">âž• Agregar Servicio (Admin)</button>
+        </form>
+      </div>
+
+      <!-- Contenedor donde se pintarÃ¡n las tarjetas de servicios de forma dinÃ¡mica -->
+      <div id="servicios" class="lista">Cargando servicios...</div>
+    </section>
+
+    <!-- SECCIÃ“N DE CLIENTES: Listado y gestiÃ³n con control administrativo -->
+    <section>
+      <h2>Clientes</h2>
+      <p class="fuente"><span id="fuente-clientes">Fuente: GET /clientes</span></p>
+      
+      <!-- Panel para registrar clientes y actualizar la vista -->
+      <div class="panel-admin">
+        <button class="btn-refrescar" onclick="cargarClientes()">ðŸ”„ Actualizar Clientes</button>
+        <form id="form-cliente" style="display:inline-block; margin-left:10px;" onsubmit="agregarCliente(event)">
+          <input type="text" id="nombreCliente" placeholder="Nombre del cliente" required />
+          <input type="text" id="telefonoCliente" placeholder="TelÃ©fono" required />
+          <button type="submit">âž• Registrar Cliente</button>
+        </form>
+      </div>
+
+      <!-- Contenedor dinÃ¡mico de clientes -->
+      <div id="clientes" class="lista">Cargando clientes...</div>
+    </section>
+
+    <!-- SECCIÃ“N DE CITAS: Permite apartar citas eligiendo el servicio de un menÃº desplegable -->
+    <section>
+      <h2>Citas</h2>
+      <p class="fuente"><span id="fuente-citas">Fuente: GET /citas</span></p>
+      
+      <!-- Panel de agendamiento de citas -->
+      <div class="panel-admin">
+        <button class="btn-refrescar" onclick="cargarCitas()">ðŸ”„ Actualizar Citas</button>
+        <form id="form-cita" style="display:inline-block; margin-left:10px;" onsubmit="agregarCita(event)">
+          <input type="text" id="clienteCita" placeholder="Nombre Cliente" required />
+          <input type="text" id="telCita" placeholder="TelÃ©fono" required />
+          
+          <!-- MenÃº desplegable (<select>) que se llena automÃ¡ticamente con los servicios disponibles -->
+          <select id="servicioCita" required>
+            <option value="">Seleccione un servicio...</option>
+          </select>
+
+          <input type="datetime-local" id="fechaCita" required />
+          <button type="submit">âž• Apartar Cita</button>
+        </form>
+      </div>
+
+      <!-- Contenedor dinÃ¡mico de citas -->
+      <div id="citas" class="lista">Cargando citas...</div>
+    </section>
+  </main>
+
+  <!-- Script principal de JavaScript que controla la lÃ³gica y la interacciÃ³n -->
+  <script src="script.js"></script>
+</body>
+</html>
+
+===== public\script.js =====
+// Usuario pÃºblico de mi Cal.com (es la parte de mi enlace: cal.com/ESTE-USUARIO/corte)
+const USUARIO_CAL = 'jose-mestra-9j6nkc';
+
+// FunciÃ³n asÃ­ncrona genÃ©rica para pedir datos a cualquier ruta del servidor
+async function pedir(ruta) {
+  const respuesta = await fetch(ruta);
+  if (!respuesta.ok) throw new Error('El servidor respondiÃ³ con error');
+  return respuesta.json();
+}
+
+// FunciÃ³n para crear dinÃ¡micamente un elemento de tarjeta HTML con sus datos
+function crearTarjeta(titulo, lineas, etiqueta, boton) {
+  const tarjeta = document.createElement('article');
+  tarjeta.className = 'tarjeta';
+
+  const h3 = document.createElement('h3');
+  h3.textContent = titulo;
+  tarjeta.appendChild(h3);
+
+  lineas.forEach((texto) => {
+    const p = document.createElement('p');
+    p.textContent = texto;
+    tarjeta.appendChild(p);
+  });
+
+  if (etiqueta) {
+    const span = document.createElement('span');
+    span.className = 'etiqueta ' + etiqueta.clase;
+    span.textContent = etiqueta.texto;
+    tarjeta.appendChild(span);
+  }
+
+  if (boton) {
+    const a = document.createElement('a');
+    a.className = 'boton-reservar';
+    a.textContent = boton.texto;
+    a.href = boton.url;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    tarjeta.appendChild(a);
+  }
+  return tarjeta;
+}
+
+// FunciÃ³n para formatear fechas de texto a un formato legible en hora de Colombia
+function formatearFecha(texto) {
+  const fecha = new Date(texto);
+  if (isNaN(fecha)) return 'Fecha no disponible';
+  return fecha.toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Bogota' });
+}
+
+// =========================================================================
+// SECCIÃ“N 1: CLIENTES (API externa + SQLite local + Botones Editar/Borrar)
+// =========================================================================
+async function cargarClientes() {
+  const cont = document.getElementById('clientes');
+  try {
+    const [clientesApi, clientesLocales] = await Promise.all([
+      pedir('/clientes').catch(() => []),
+      pedir('/clientes-locales').catch(() => [])
+    ]);
+
+    const totalClientes = [...clientesApi, ...clientesLocales];
+    document.getElementById('fuente-clientes').textContent =
+      'Fuente: API externa + Base de datos SQLite Â· ' + totalClientes.length + ' registros recibidos';
+    
+    cont.textContent = '';
+    if (totalClientes.length === 0) { 
+      cont.textContent = 'TodavÃ­a no hay clientes registrados'; 
+      return; 
+    }
+
+    clientesApi.forEach((c) => {
+      cont.appendChild(crearTarjeta(c.name, [c.phone, c.email]));
+    });
+
+    clientesLocales.forEach((c) => {
+      const nombre = c.nombre || 'Cliente Local';
+      const telefono = c.telefono ? 'TelÃ©fono: ' + c.telefono : 'Sin telÃ©fono';
+      const idCliente = c.id || c.codigo || c.idCliente;
+      
+      const tarjeta = crearTarjeta(nombre, [telefono], { texto: 'BD Local', clase: 'atendida' });
+
+      const btnEditar = document.createElement('button');
+      btnEditar.textContent = 'âœï¸ Editar';
+      btnEditar.className = 'btn-accion';
+      btnEditar.onclick = async () => {
+        const nuevoNombre = prompt('Nuevo nombre:', c.nombre);
+        const nuevoTelefono = prompt('Nuevo telÃ©fono:', c.telefono);
+        if (nuevoNombre && idCliente) {
+          await fetch('/clientes-locales/' + idCliente, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nombre: nuevoNombre, telefono: nuevoTelefono })
+          });
+          cargarClientes();
+        }
+      };
+
+      const btnBorrar = document.createElement('button');
+      btnBorrar.textContent = 'ðŸ—‘ï¸ Borrar';
+      btnBorrar.className = 'btn-accion btn-eliminar';
+      btnBorrar.onclick = async () => {
+        if (confirm('Â¿Seguro que deseas eliminar este cliente?') && idCliente) {
+          await fetch('/clientes-locales/' + idCliente, { method: 'DELETE' });
+          cargarClientes();
+        }
+      };
+
+      tarjeta.appendChild(btnEditar);
+      tarjeta.appendChild(btnBorrar);
+      cont.appendChild(tarjeta);
+    });
+
+  } catch (error) {
+    cont.textContent = 'No se pudieron cargar los clientes';
+  }
+}
+
+async function agregarCliente(e) {
+  e.preventDefault();
+  const nombre = document.getElementById('nombreCliente').value;
+  const telefono = document.getElementById('telefonoCliente').value;
+
+  const res = await fetch('/clientes-locales', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nombre, telefono })
+  });
+
+  if (res.ok) {
+    document.getElementById('form-cliente').reset();
+    cargarClientes();
+  } else {
+    alert('Error al guardar el cliente');
+  }
+}
+
+// =========================================================================
+// SECCIÃ“N 2: SERVICIOS (Cal.com + SQLite local + ID Robusto + Botones Admin)
+// =========================================================================
+async function cargarServicios() {
+  const cont = document.getElementById('servicios');
+  const selectCita = document.getElementById('servicioCita');
+  
+  if (selectCita) {
+    selectCita.innerHTML = '<option value="">Seleccione un servicio...</option>';
+  }
+
+  try {
+    const [serviciosCal, serviciosLocales] = await Promise.all([
+      pedir('/servicios').catch(() => []),
+      pedir('/servicios-locales').catch(() => [])
+    ]);
+
+    const totalServicios = [...serviciosCal, ...serviciosLocales];
+    document.getElementById('fuente-servicios').textContent =
+      'Fuente: API Cal.com + Base de datos SQLite Â· ' + totalServicios.length + ' registros recibidos';
+    
+    cont.textContent = '';
+    if (totalServicios.length === 0) { 
+      cont.textContent = 'TodavÃ­a no hay servicios creados'; 
+      return; 
+    }
+
+    // 1. Pinta servicios de Cal.com
+    serviciosCal.filter((s) => !s.hidden).forEach((s) => {
+      const nombre = s.title || s.name || 'Servicio';
+      const minutos = s.lengthInMinutes || s.length;
+      const lineas = [];
+      if (s.description) lineas.push(s.description);
+      if (minutos) lineas.push('DuraciÃ³n: ' + minutos + ' minutos');
+      const url = s.bookingUrl || ('https://cal.com/' + USUARIO_CAL + '/' + encodeURIComponent(s.slug));
+      cont.appendChild(crearTarjeta(nombre, lineas, null, { texto: 'Pedir cita', url: url }));
+
+      if (selectCita) {
+        const option = document.createElement('option');
+        option.value = nombre;
+        option.textContent = nombre;
+        selectCita.appendChild(option);
+      }
+    });
+
+    // 2. Pinta servicios locales
+    serviciosLocales.forEach((s) => {
+      const nombre = s.nombre || 'Servicio Local';
+      // Detecta cualquier propiedad posible para el ID en la BD
+      const idServicio = s.id || s.codigo || s.idServicio || s.servicioId;
+      
+      let precioTexto = '';
+      if (s.precio !== undefined && s.precio !== null) {
+        const precioFormateado = Number(s.precio).toLocaleString('es-CO');
+        precioTexto = 'Precio: $' + precioFormateado;
+      }
+      
+      const lineas = [];
+      if (precioTexto) lineas.push(precioTexto);
+
+      const urlLocal = 'https://cal.com/' + USUARIO_CAL;
+      const tarjeta = crearTarjeta(
+        nombre, 
+        lineas, 
+        { texto: 'BD Local', clase: 'atendida' }, 
+        { texto: 'Pedir cita', url: urlLocal }
+      );
+
+      // BotÃ³n Editar servicio local
+      const btnEditar = document.createElement('button');
+      btnEditar.textContent = 'âœï¸ Editar';
+      btnEditar.className = 'btn-accion';
+      btnEditar.onclick = async () => {
+        const nuevoNombre = prompt('Nuevo nombre del servicio:', s.nombre);
+        const nuevoPrecioStr = prompt('Nuevo precio ($):', s.precio);
+        
+        if (nuevoNombre !== null && idServicio) {
+          let nuevoPrecio = Number(nuevoPrecioStr);
+          if (nuevoPrecio < 1000) nuevoPrecio = nuevoPrecio * 1000;
+
+          const respuestaPut = await fetch('/servicios-locales/' + idServicio, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              nombre: nuevoNombre, 
+              precio: isNaN(nuevoPrecio) ? 0 : nuevoPrecio, 
+              activo: true 
+            })
+          });
+
+          if (respuestaPut.ok) {
+            cargarServicios();
+          } else {
+            alert('No se pudo actualizar el servicio');
+          }
+        } else {
+          alert('Error: No se encontrÃ³ el ID del servicio');
+        }
+      };
+
+      // BotÃ³n Borrar servicio local
+      const btnBorrar = document.createElement('button');
+      btnBorrar.textContent = 'ðŸ—‘ï¸ Borrar';
+      btnBorrar.className = 'btn-accion btn-eliminar';
+      btnBorrar.onclick = async () => {
+        if (confirm('Â¿Seguro que deseas eliminar este servicio local?') && idServicio) {
+          const resBorrar = await fetch('/servicios-locales/' + idServicio, { 
+            method: 'DELETE' 
+          });
+
+          if (resBorrar.ok) {
+            cargarServicios();
+          } else {
+            alert('No se pudo eliminar el servicio en el servidor');
+          }
+        } else {
+          alert('Error: No se encontrÃ³ el ID del servicio');
+        }
+      };
+
+      tarjeta.appendChild(btnEditar);
+      tarjeta.appendChild(btnBorrar);
+      cont.appendChild(tarjeta);
+
+      if (selectCita) {
+        const option = document.createElement('option');
+        option.value = nombre;
+        option.textContent = nombre + (s.precio !== undefined ? ' ($' + Number(s.precio).toLocaleString('es-CO') + ')' : '');
+        selectCita.appendChild(option);
+      }
+    });
+
+  } catch (error) {
+    cont.textContent = 'No se pudieron cargar los servicios';
+  }
+}
+
+async function agregarServicio(e) {
+  e.preventDefault();
+  const nombre = document.getElementById('nombreServicio').value;
+  let precioInput = parseFloat(document.getElementById('precioServicio').value);
+
+  if (precioInput < 1000) {
+    precioInput = precioInput * 1000;
+  }
+
+  const res = await fetch('/servicios-locales', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nombre, precio: precioInput, activo: true })
+  });
+
+  if (res.ok) {
+    document.getElementById('form-servicio').reset();
+    cargarServicios();
+  } else {
+    alert('Error al guardar el servicio');
+  }
+}
+
+// =========================================================================
+// SECCIÃ“N 3: CITAS (Cal.com + SQLite local + MenÃº desplegable + BotÃ³n Borrar)
+// =========================================================================
+async function cargarCitas() {
+  const cont = document.getElementById('citas');
+  try {
+    const [citasCal, citasLocales] = await Promise.all([
+      pedir('/citas').catch(() => []),
+      pedir('/reservas').catch(() => [])
+    ]);
+
+    const totalCitas = [...citasCal, ...citasLocales];
+    document.getElementById('fuente-citas').textContent =
+      'Fuente: API Cal.com + Base de datos SQLite Â· ' + totalCitas.length + ' registros recibidos';
+    
+    cont.textContent = '';
+    if (totalCitas.length === 0) { 
+      cont.textContent = 'TodavÃ­a no hay citas apartadas'; 
+      return; 
+    }
+
+    citasCal.forEach((c) => {
+      const cliente = c.attendees && c.attendees[0] ? c.attendees[0].name : 'Cliente sin nombre';
+      let etiqueta = { texto: 'Pendiente (Cal.com)', clase: 'pendiente' };
+      if (c.status === 'accepted') etiqueta = { texto: 'Confirmada (Cal.com)', clase: 'atendida' };
+      if (c.status === 'cancelled') etiqueta = { texto: 'Cancelada', clase: 'cancelada' };
+      
+      cont.appendChild(crearTarjeta(
+        c.title || 'Cita de Cal.com', 
+        ['Fecha: ' + formatearFecha(c.start), 'Cliente: ' + cliente], 
+        etiqueta
+      ));
+    });
+
+    citasLocales.forEach((c) => {
+      const servicio = c.servicio || 'Cita Local';
+      const idReserva = c.id || c.codigo || c.idReserva;
+      const lineas = [
+        'Cliente: ' + (c.clienteNombre || 'Sin nombre'),
+        'TelÃ©fono: ' + (c.telefono || 'Sin telÃ©fono'),
+        'Fecha: ' + formatearFecha(c.fechaHora)
+      ];
+      
+      const tarjeta = crearTarjeta(servicio, lineas, { texto: 'Guardada en BD (Local)', clase: 'atendida' });
+
+      const btnBorrar = document.createElement('button');
+      btnBorrar.textContent = 'ðŸ—‘ï¸ Borrar';
+      btnBorrar.className = 'btn-accion btn-eliminar';
+      btnBorrar.onclick = async () => {
+        if (confirm('Â¿Seguro que deseas eliminar esta cita?') && idReserva) {
+          await fetch('/reservas/' + idReserva, { method: 'DELETE' });
+          cargarCitas();
+        }
+      };
+
+      tarjeta.appendChild(btnBorrar);
+      cont.appendChild(tarjeta);
+    });
+
+  } catch (error) {
+    cont.textContent = 'No se pudieron cargar las citas';
+  }
+}
+
+async function agregarCita(e) {
+  e.preventDefault();
+  const clienteNombre = document.getElementById('clienteCita').value;
+  const telefono = document.getElementById('telCita').value;
+  const servicio = document.getElementById('servicioCita').value;
+  const fechaHora = document.getElementById('fechaCita').value;
+
+  const res = await fetch('/reservas', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clienteNombre, telefono, servicio, fechaHora })
+  });
+
+  if (res.ok) {
+    document.getElementById('form-cita').reset();
+    cargarCitas();
+  } else {
+    alert('Error al guardar la cita');
+  }
+}
+
+// EjecuciÃ³n automÃ¡tica al cargar la pÃ¡gina
+cargarClientes();
+cargarServicios();
+cargarCitas();
+
+===== package.json =====
+{
+  "name": "barber-club",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "axios": "^1.20.0",
+    "better-sqlite3": "^12.11.1",
+    "dotenv": "^18.0.9",
+    "express": "^5.3.0",
+    "reflect-metadata": "^0.2.2",
+    "sqlite3": "^6.0.1",
+    "typeorm": "^1.1.2"
+  },
+  "devDependencies": {
+    "jest": "^30.5.2"
+  }
+}
+
+===== README.md =====
+# Barber Club - API REST & Base de Datos Local
+
+Proyecto de aplicaciÃ³n web para la gestiÃ³n administrativa de la barberÃ­a MVP Barber Club. El sistema combina el consumo de APIs externas para agendamiento con persistencia de datos local mediante **TypeORM** y **SQLite**, ofreciendo un flujo CRUD completo y arquitectura escalable.
+
+---
+
+## ðŸ› ï¸ TecnologÃ­as e Infraestructura
+- **Backend:** Node.js con Express.
+- **Base de Datos Local:** SQLite administrada a travÃ©s de **TypeORM** (generaciÃ³n de esquemas y tablas sin SQL manual).
+- **Frontend:** Interfaz web interactiva estructurada en HTML5/CSS3 y manipulaciÃ³n dinÃ¡mica del DOM con `fetch` API.
+- **Integraciones Externas:** Consumo de la API de Cal.com (servicios y citas) y JSONPlaceholder (clientes de prueba).
+
+---
+
+## ðŸš€ Endpoints e Interfaz de Aplicaciones (API REST)
+
+### 1. Servicios Externos (Reto 1)
+- `GET /servicios`: Consulta y retorna la lista de servicios agendables desde la API de Cal.com.
+- `GET /citas`: Obtiene la lista de citas programadas desde la plataforma Cal.com.
+- `GET /clientes`: Retorna datos sintÃ©ticos de prueba obtenidos desde JSONPlaceholder.
+
+### 2. Persistencia y CRUD Local (Reto 2)
+- **GestiÃ³n de Servicios Locales (`/servicios-locales`):**
+  - `GET /servicios-locales`: Consulta todos los servicios guardados localmente en SQLite.
+  - `POST /servicios-locales`: Crea un nuevo servicio local formateando el precio.
+  - `PUT /servicios-locales/:id`: Actualiza los datos de un servicio mediante su identificador Ãºnico.
+  - `DELETE /servicios-locales/:id`: Elimina un registro de servicio de la base de datos local.
+
+- **GestiÃ³n de Clientes y Reservas (`/clientes-locales`, `/reservas`):**
+  - `GET /reservas` / `POST /reservas`: Operaciones de consulta y agendamiento local.
+  - `PUT /reservas/:id` / `DELETE /reservas/:id`: ActualizaciÃ³n y cancelaciÃ³n de citas guardadas en SQLite.
+
+---
+
+## ðŸ“Š Diagrama de Flujo del Sistema
+
+```mermaid
+flowchart TD
+    subgraph Frontend [Cliente / Navegador]
+        UI[Interfaz Web HTML/JS]
+        Form[Formulario de GestiÃ³n]
+    end
+
+    subgraph Backend [Servidor Express.js]
+        API_Routes[Rutas API REST /app.js]
+        Ctrl_Ext[Controlador APIs Externas]
+        Ctrl_Res[Controlador Reservas]
+        ORM[TypeORM / AppDataSource]
+    end
+
+    subgraph External [Servicios Externos]
+        Cal[API Cal.com]
+        JSONP[JSONPlaceholder]
+    end
+
+    subgraph Database [Persistencia]
+        DB[(Base de Datos SQLite / barberia.sqlite)]
+    end
+
+    %% Flujos de lectura (GET)
+    UI -->|GET /servicios| API_Routes
+    UI -->|GET /citas| API_Routes
+    UI -->|GET /clientes| API_Routes
+    
+    API_Routes --> Ctrl_Ext
+    Ctrl_Ext -->|Consulta Cal.com| Cal
+    Ctrl_Ext -->|Consulta JSONPlaceholder| JSONP
+
+    %% Flujos CRUD Local (POST / PUT / DELETE)
+    UI -->|GET/POST/PUT/DELETE /servicios-locales| API_Routes
+    UI -->|GET/POST/PUT/DELETE /clientes-locales| API_Routes
+    UI -->|POST /reservas| Form
+    Form --> API_Routes
+
+    API_Routes --> Ctrl_Res
+    API_Routes --> ORM
+    
+    ORM -->|Guarda / Modifica / Elimina| DB
+    DB -->|Retorna Datos SQLite| ORM
+
+===== .gitignore =====
+node_modules 
+.env
+

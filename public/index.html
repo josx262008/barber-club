@@ -5,36 +5,92 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MVP Barber Club</title>
   <link rel="stylesheet" href="estilos.css">
+  <style>
+    /* Estilos estéticos para los paneles de administración y formularios en la interfaz */
+    .panel-admin { background: #f4f4f4; padding: 15px; margin-bottom: 15px; border-radius: 8px; border: 1px solid #ddd; }
+    .panel-admin input, .panel-admin select { padding: 8px; margin-right: 5px; margin-bottom: 5px; width: 200px; }
+    .panel-admin button { padding: 8px 12px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    .panel-admin button:hover { background: #0056b3; }
+    .btn-refrescar { background: #28a745; margin-bottom: 10px; }
+    .btn-refrescar:hover { background: #218838; }
+    .btn-accion { background: #ffc107; border: none; padding: 4px 8px; margin-left: 5px; cursor: pointer; border-radius: 3px; font-size: 12px; }
+    .btn-eliminar { background: #dc3545; color: white; }
+  </style>
 </head>
 <body>
+  <!-- Encabezado principal de la aplicación web -->
   <header>
     <h1>MVP Barber Club</h1>
-    <p>Servicios, clientes y citas</p>
+    <p>Servicios, clientes y citas (Gestión Profesional)</p>
   </header>
 
   <main>
-    <!-- Servicios (vienen de Cal.com) -->
+    <!-- SECCIÓN DE SERVICIOS: Solo el administrador define precios y servicios -->
     <section>
       <h2>Servicios</h2>
-      <p class="fuente"><span id="fuente-servicios">Fuente: GET /servicios</span> · <a href="/servicios" target="_blank">Ver JSON</a></p>
+      <p class="fuente"><span id="fuente-servicios">Fuente: GET /servicios</span></p>
+      
+      <!-- Panel con el botón de actualizar y el formulario exclusivo del administrador -->
+      <div class="panel-admin">
+        <button class="btn-refrescar" onclick="cargarServicios()">🔄 Actualizar Servicios</button>
+        <form id="form-servicio" style="display:inline-block; margin-left:10px;" onsubmit="agregarServicio(event)">
+          <input type="text" id="nombreServicio" placeholder="Nombre del servicio" required />
+          <input type="number" id="precioServicio" placeholder="Precio ($)" required />
+          <button type="submit">➕ Agregar Servicio (Admin)</button>
+        </form>
+      </div>
+
+      <!-- Contenedor donde se pintarán las tarjetas de servicios de forma dinámica -->
       <div id="servicios" class="lista">Cargando servicios...</div>
     </section>
 
-    <!-- Clientes (datos de prueba de JSONPlaceholder) -->
+    <!-- SECCIÓN DE CLIENTES: Listado y gestión con control administrativo -->
     <section>
       <h2>Clientes</h2>
-      <p class="fuente"><span id="fuente-clientes">Fuente: GET /clientes</span> · <a href="/clientes" target="_blank">Ver JSON</a></p>
+      <p class="fuente"><span id="fuente-clientes">Fuente: GET /clientes</span></p>
+      
+      <!-- Panel para registrar clientes y actualizar la vista -->
+      <div class="panel-admin">
+        <button class="btn-refrescar" onclick="cargarClientes()">🔄 Actualizar Clientes</button>
+        <form id="form-cliente" style="display:inline-block; margin-left:10px;" onsubmit="agregarCliente(event)">
+          <input type="text" id="nombreCliente" placeholder="Nombre del cliente" required />
+          <input type="text" id="telefonoCliente" placeholder="Teléfono" required />
+          <button type="submit">➕ Registrar Cliente</button>
+        </form>
+      </div>
+
+      <!-- Contenedor dinámico de clientes -->
       <div id="clientes" class="lista">Cargando clientes...</div>
     </section>
 
-    <!-- Citas (vienen de Cal.com) -->
+    <!-- SECCIÓN DE CITAS: Permite apartar citas eligiendo el servicio de un menú desplegable -->
     <section>
       <h2>Citas</h2>
-      <p class="fuente"><span id="fuente-citas">Fuente: GET /citas</span> · <a href="/citas" target="_blank">Ver JSON</a></p>
+      <p class="fuente"><span id="fuente-citas">Fuente: GET /citas</span></p>
+      
+      <!-- Panel de agendamiento de citas -->
+      <div class="panel-admin">
+        <button class="btn-refrescar" onclick="cargarCitas()">🔄 Actualizar Citas</button>
+        <form id="form-cita" style="display:inline-block; margin-left:10px;" onsubmit="agregarCita(event)">
+          <input type="text" id="clienteCita" placeholder="Nombre Cliente" required />
+          <input type="text" id="telCita" placeholder="Teléfono" required />
+          
+          <!-- Menú desplegable (<select>) que se llena automáticamente con los servicios disponibles -->
+          <select id="servicioCita" required>
+            <option value="">Seleccione un servicio...</option>
+          </select>
+
+          <input type="datetime-local" id="fechaCita" required />
+          <button type="submit">➕ Apartar Cita</button>
+        </form>
+      </div>
+
+      <!-- Contenedor dinámico de citas -->
       <div id="citas" class="lista">Cargando citas...</div>
     </section>
   </main>
 
+  <!-- Script principal de JavaScript que controla la lógica y la interacción -->
   <script src="script.js"></script>
 </body>
 </html>
