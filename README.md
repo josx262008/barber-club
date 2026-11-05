@@ -32,16 +32,10 @@ Proyecto de aplicación web para la gestión administrativa de la barbería MVP 
 
 ---
 
-## ⚙️ Instrucciones de Ejecución
+## 📊 Diagrama de Flujo del Sistema
 
-1. **Instalar dependencias del proyecto:**
-   ```bash
-   npm install
-   CAL_API_KEY=cal_live_728d8d7db68319ec3e56d2c53af39346
-   node src/database/iniciar.js
-   node src/app.js
-
-   flowchart TD
+```mermaid
+flowchart TD
     subgraph Frontend [Cliente / Navegador]
         UI[Interfaz Web HTML/JS]
         Form[Formulario de Gestión]
@@ -82,4 +76,4 @@ Proyecto de aplicación web para la gestión administrativa de la barbería MVP 
     API_Routes --> ORM
     
     ORM -->|Guarda / Modifica / Elimina| DB
-    DB -->|Retorna Datos SQLite| ORM
+    DB -->|Retorna Datos SQLite| ORM ```
