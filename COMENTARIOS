@@ -3,6 +3,11 @@ Servidor en http://localhost:3000 Esa terminal queda ocupada mientras el servido
 
 Pasa a Postman, pon http://localhost:3000/clientes con GET, dale Send y muestra el JSON con el 200 OK. Haz lo mismo con /citas.
 
+http://localhost:3000/servicios
+http://localhost:3000/citas
+http://localhost:3000/clientes
+
+https://api.cal.com/v2/event-types
 
 Abre una segunda terminal con el botón + de la zona de terminal, y escribe npm test , Salen las 3 pruebas en verde.
 
@@ -14,6 +19,8 @@ BASE DE DATOS    Base de datos: SQLite (archivo barberia.sqlite), con el ORM Typ
 
 
  PARA CORRERLO "   node src/database/iniciar.js    "
+
+ 
 
 1. Qué instalamos y para qué
 

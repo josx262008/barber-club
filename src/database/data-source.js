@@ -5,17 +5,18 @@ const { DataSource } = require('typeorm');
 // Importo las descripciones de las tablas que creé
 const Cliente = require('../entities/Cliente');
 const Servicio = require('../entities/Servicio');
+const Cita = require('../entities/Cita');
 
 // Creo la conexión con su configuración
 const AppDataSource = new DataSource({
   // Tipo de base de datos que uso: SQLite
-    type: 'better-sqlite3',
+  type: 'better-sqlite3',
   // Nombre del archivo donde se va a guardar la base de datos
   database: 'barberia.sqlite',
   // synchronize: true hace que el ORM cree las tablas solo, sin CREATE TABLE
   synchronize: true,
   // Lista de tablas que el ORM debe crear
-  entities: [Cliente, Servicio]
+  entities: [Cliente, Servicio, Cita]
 });
 
 // Exporto la conexión para usarla en otros archivos
