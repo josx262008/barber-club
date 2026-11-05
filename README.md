@@ -76,4 +76,4 @@ flowchart TD
     API_Routes --> ORM
     
     ORM -->|Guarda / Modifica / Elimina| DB
-    DB -->|Retorna Datos SQLite| ORM ```
+    DB -->|Retorna Datos SQLite| ORM
