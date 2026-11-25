@@ -33,6 +33,7 @@ function crearReservaControlador(servicio, notificador) {
     crear: async (req, res) => {
       try {
         const datos = limpiar(req.body || {});
+        if (!datos.estado) datos.estado = 'pendiente';
         const error = validar(datos, true);
         if (error) return res.status(400).json({ error });
         // Paso 1: guardo en la base de datos

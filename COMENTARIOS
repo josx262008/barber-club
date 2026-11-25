@@ -104,3 +104,314 @@ src/services/apiService.js: es el que sale a internet. Tiene dos funciones, obte
 src/controllers/controlador.js: es el que atiende lo que piden. Recibe el servicio desde afuera (la inyección de dependencias), le pide los datos y los devuelve como JSON. Si algo falla, no explota: responde con un error 500 y un mensaje claro. Es el barbero que atiende al cliente y usa la herramienta que le entregaron.
 src/app.js: es la puerta de entrada. Enciende el servidor en el puerto 3000, le entrega el servicio real al controlador y dice qué ruta hace qué: /clientes va a la función de clientes y /citas a la de citas.
 tests/pruebas.test.js: son las 3 pruebas. Usan servicios falsos para comprobar que el formato es correcto, que los errores se manejan bien y que el controlador funciona sin internet.
+
+
+
+
+
+
+
+
+
+
+
+
+
+=====================================================
+MAPA DEL PROYECTO BARBER-CLUB
+=====================================================
+
+ESTRUCTURA
+- src/app.js                          -> servidor, rutas y CRUD de clientes y servicios
+- src/controllers/controlador.js      -> Reto 1: /clientes, /servicios, /citas (APIs externas)
+- src/controllers/reservaControlador.js -> CRUD de reservas
+- src/services/apiService.js          -> llamadas a Cal.com y JSONPlaceholder (axios)
+- src/services/reservaService.js      -> guarda/borra reservas en la BD (PENDIENTE de revisar)
+- src/services/notificadorService.js  -> envía la reserva a la API externa
+- src/database/data-source.js         -> conexión SQLite (barberia.sqlite, synchronize: true)
+- src/database/iniciar.js             -> crea las tablas manualmente
+- src/entities/Cliente.js, Servicio.js, Cita.js -> columnas de las tablas (PENDIENTE de revisar)
+- public/script.js                    -> frontend (fetch al servidor)
+- tests/pruebas.test.js               -> pruebas con jest (npm test)
+- .env                                -> CAL_API_KEY y CLAVE_BARBERO (NO compartir ni subir a GitHub)
+
+NOTA: las reservas se guardan en la entidad "Cita".
+
+-----------------------------------------------------
+BACKEND: src/app.js
+-----------------------------------------------------
+Línea ~22   soloBarbero (middleware: revisa el header x-clave-barbero)
+Línea ~31   POST /login-barbero (entrar como barbero)
+Línea ~40   Reto 1: GET /clientes, /citas, /servicios (APIs externas)
+
+RESERVAS (usan reservaControlador.js)
+  POST   /reservas        -> línea ~45  (crear, cualquiera)
+  GET    /reservas        -> línea ~46  (listar)
+  GET    /reservas/:id    -> línea ~47  (obtener una)
+  PUT    /reservas/:id    -> línea ~48  (editar)
+  DELETE /reservas/:id    -> línea ~49  (borrar, solo barbero)
+
+CLIENTES LOCALES (TypeORM directo en app.js)
+  GET    /clientes-locales      -> línea ~52
+  POST   /clientes-locales      -> línea ~62  (cualquiera)
+  PUT    /clientes-locales/:id  -> línea ~73  (cualquiera)
+  DELETE /clientes-locales/:id  -> línea ~82  (solo barbero)
+
+SERVICIOS LOCALES (TypeORM directo en app.js)
+  GET    /servicios-locales      -> línea ~92  (cualquiera)
+  POST   /servicios-locales      -> línea ~102 (solo barbero)
+  PUT    /servicios-locales/:id  -> línea ~113 (solo barbero)
+  DELETE /servicios-locales/:id  -> línea ~123 (solo barbero)
+
+BORRAR TODO
+  DELETE /datos -> línea ~134 (solo barbero; vacía Cita, Servicio y Cliente)
+
+ARRANQUE
+  AppDataSource.initialize() + app.listen(3000) -> línea ~148
+
+-----------------------------------------------------
+BACKEND: src/controllers/reservaControlador.js
+-----------------------------------------------------
+Línea 2     ESTADOS permitidos (pendiente, confirmada, atendida, cancelada)
+Línea 5-11  limpiar()  -> deja pasar solo los campos permitidos
+Línea 14-27 validar()  -> revisa obligatorios y estado
+Línea 33-53 crear      (guarda en BD y luego notifica a la API externa)
+Línea 56-62 listar
+Línea 65-76 obtener por id (404 si no existe)
+Línea 79-93 actualizar (404 si no existe)
+Línea 96-107 eliminar  (404 si no existe)
+
+-----------------------------------------------------
+BACKEND: src/controllers/controlador.js (Reto 1)
+-----------------------------------------------------
+clientes  -> pide /clientes  (usa servicio.obtenerClientes)
+servicios -> pide /servicios (usa servicio.obtenerServicios)
+citas     -> pide /citas     (usa servicio.obtenerCitas)
+Todos con try/catch y error 500 si la API externa falla.
+
+-----------------------------------------------------
+FRONTEND: public/script.js
+-----------------------------------------------------
+Línea ~1    USUARIO_CAL (usuario público de Cal.com)
+Línea ~5    claveBarbero / esBarbero() / cabeceras()
+Línea ~25   alternarBarbero() (botón "Soy el barbero")
+Línea ~45   pedir() (GET genérico)
+
+CLIENTES
+  cargarClientes() (leer)  -> ~100
+  Editar (PUT)             -> ~120
+  Borrar (DELETE)          -> ~131
+  agregarCliente() (POST)  -> ~145
+
+SERVICIOS
+  cargarServicios() (leer) -> ~157
+  Editar (PUT)             -> ~199
+  Borrar (DELETE)          -> ~209
+  agregarServicio() (POST) -> ~230
+
+CITAS
+  cargarCitas() (leer)     -> ~243
+  Borrar (DELETE)          -> ~275
+  agregarCita() (POST)     -> ~289
+  (no tiene botón de editar)
+
+BORRAR TODO
+  borrarTodo()             -> ~303
+cargarTodo()               -> al final (carga clientes, servicios y citas)      
+
+
+
+
+
+
+
+
+
+Apaga todo. En la terminal de VS Code ejecuta    taskkill /F /IM node.exe.     Así empiezas con el servidor apagado.
+
+
+P Postman, con una pestaña nueva (el +) para cada petición:
+
+GET http://localhost:3000/health
+POST http://localhost:3000/clientes-locales, con el body { "nombre": "", "telefono": "abc", "id": 999 }
+POST http://localhost:3000/clientes-locales, con el body roto { "nombre":
+PUT http://localhost:3000/reservas/ID, con el body { "estado": "cancelada" } y sin headers. Antes de la clase haz un GET /reservas y reemplaza ID por un id que exista.
+Abre estas pestañas en VS Code para no buscar archivos delante de la profe: src/app.js, src/logger.js, tests/integracion.test.js y src/database/data-source.js.
+La demostración, en este orden
+1. Con el servidor apagado: las pruebas automáticas
+npm test
+Qué hace: corre todas las pruebas con Jest.
+Para qué sirve: las pruebas de integración no necesitan el servidor encendido. Usan una base de datos en memoria, así que no tocan tus datos reales.
+Qué mostrar: 6 passed. Si quieres ver los nombres, ejecuta npx jest tests/integracion.test.js --verbose y se ven Create, Read y Delete en verde.
+Qué decir: “Estas son las 3 pruebas de integración. Cada una pasa por la ruta, la validación, el controlador y la base de datos, todo junto.”
+Muestra en el código tests/integracion.test.js: la base en memoria (NODE_ENV = 'test') y el notificador simulado.
+2. Enciende el servidor
+npm start
+Qué hace: arranca el servidor.
+Qué mostrar: Servidor en http://localhost:3000, y que la terminal no devuelve el prompt.
+3. Observabilidad
+En Postman, envía GET /health y muestra el 200 con status: ok.
+Envía también GET /servicios-locales y GET /no-existe.
+Señala la terminal del servidor: salen líneas como GET /health 200 4ms y GET /no-existe 404 2ms.
+Abre logs/app.log y muestra que quedaron guardadas.
+Qué decir: “Los logs son los instrumentos de mi aplicación. Cada petición queda registrada con método, ruta, código y tiempo.”
+Muestra en el código src/logger.js y el middleware que está en app.js, debajo de const app = express();.
+4. Hardening: el “antes” desde el código y el “después” en vivo
+
+Cómo mostrar el “antes” sin capturas:
+
+En VS Code presiona Ctrl + Shift + G (el panel de control de código fuente).
+Haz clic en app.js y se abre una comparación lado a lado. A la izquierda está el código viejo (el “antes”) y a la derecha el actual (el “después”).
+La comparación también mostrará cambios de la sincronización con las APIs que hiciste antes del reto. Ignora esos y ve a las zonas de abajo.
+
+Vulnerabilidad 1, sin validación
+
+En la comparación, busca la ruta POST /clientes-locales. A la izquierda guardaba req.body tal cual, y a la derecha usa limpiarCliente y validarCliente.
+En vivo, envía el POST con el body malo. Responde 400 Falta el campo obligatorio: nombre.
+Qué decir: “Antes aceptaba cualquier dato. Ahora solo deja pasar nombre y teléfono, y revisa largo y formato.”
+
+Vulnerabilidad 2, sin autenticación
+
+En la comparación, busca app.put('/reservas/:id'. A la izquierda no tiene soloBarbero, y a la derecha sí.
+En vivo, envía el PUT sin headers. Responde 401 Solo el barbero puede hacer esto.
+Después agrega en Headers x-clave-barbero con la clave de tu .env y envíalo otra vez: responde 200. Así muestras que el barbero sí puede.
+Desmarca ese header al terminar.
+Qué decir: “Cualquiera podía cancelar reservas. Ahora hace falta la clave del barbero.”
+
+Vulnerabilidad 3, errores técnicos expuestos
+
+En la comparación, muestra que a la izquierda no existía el manejador de errores ni app.disable('x-powered-by'), y a la derecha sí.
+En vivo, envía el POST con el JSON roto. Responde 400 El JSON enviado no es válido, sin stacktrace.
+Abre logs/app.log: ahí está el [ERROR] con el stacktrace completo.
+En la segunda terminal (el +) ejecuta:
+curl.exe -i http://localhost:3000/health
+Qué hace: hace una petición y muestra los encabezados de la respuesta.
+Para qué sirve: comprobar que ya no aparece X-Powered-By: Express.
+Qué decir: “Antes el usuario veía las carpetas de mi computador y qué tecnología uso. Ahora el detalle queda en el log y al usuario solo le llega un mensaje genérico.”
+5. Cierre: la web integrada
+
+Abre http://localhost:3000 y muestra que carga con todos los datos. Qué decir: “El proyecto integra los tres retos: las APIs, la base de datos con el CRUD, y ahora logs, seguridad y pruebas.”
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Bloque 1: Observabilidad — Ubicación en el código
+Logger con Winston (consola y archivo logs/app.log)
+
+Carpeta / Archivo: src/logger.js
+
+Dónde está: Configuración de winston.createLogger con transporte a consola (new winston.transports.Console()) y archivo (new winston.transports.File({ filename: 'logs/app.log' })), además de logger.fallo para registrar errores con su stacktrace en nivel error (aprox. líneas 1–33 de src/logger.js).
+
+Registro de cada petición (método, ruta, código HTTP y tiempo)
+
+Carpeta / Archivo: src/app.js
+
+Dónde está: Middleware app.use((req, res, next) => { ... }) que escucha res.on('finish', ...) y registra con logger.info(...) el método, ruta original, código HTTP y tiempo en milisegundos (aprox. líneas 22–28 de src/app.js).
+
+Endpoint de salud GET /health
+
+Carpeta / Archivo: src/app.js
+
+Dónde está: app.get('/health', (req, res) => { res.json({ status: 'ok', timestamp: new Date().toISOString() }); }) (aprox. líneas 30–34 de src/app.js).
+
+Manejo centralizado de errores sin exponer detalles técnicos al cliente
+
+Carpeta / Archivo: src/app.js
+
+Dónde está: Middleware final de errores app.use((err, req, res, next) => { ... }), que guarda logger.fallo(...) con el error/stacktrace completo y responde al cliente con mensajes genéricos (400 si el JSON no es válido, 500 con 'Error interno del servidor') (aprox. líneas 208–219 de src/app.js).
+
+Bloque 2: Observabilidad — Pruebas en Postman
+Comprobar salud del servidor:
+
+Método y URL: GET http://localhost:3000/health
+
+Resultado esperado: 200 OK con { "status": "ok", "timestamp": "..." }.
+
+Qué revisar: Que aparezca el log [INFO] GET /health 200 ...ms en la terminal y en logs/app.log.
+
+Probar otra ruta existente y una inexistente:
+
+Método y URL: GET http://localhost:3000/servicios-locales
+
+Método y URL: GET http://localhost:3000/no-existe
+
+Qué revisar: Que en la terminal y en logs/app.log queden registradas ambas peticiones con su código HTTP (200 y 404) y duración en ms.
+
+Bloque 3: Hardening — Ubicación en el código
+Credenciales / claves fuera del código (variables de entorno .env)
+
+Carpetas / Archivos: src/services/apiService.js y src/app.js
+
+Dónde está:
+
+En src/services/apiService.js (aprox. líneas 1–19): uso de require('dotenv').config() y process.env.CAL_API_KEY.
+
+En src/app.js (aprox. líneas 40–52): uso de process.env.CLAVE_BARBERO en soloBarbero y en POST /login-barbero.
+
+Endpoints sin autenticación (protección de rutas sensibles)
+
+Carpeta / Archivo: src/app.js
+
+Dónde está: Función soloBarbero (aprox. líneas 40–45) y su uso como middleware en rutas de escritura/borrado/administración como PUT /reservas/:id, DELETE /reservas/:id, DELETE /clientes-locales/:id, rutas de /servicios-locales (POST, PUT, DELETE), DELETE /datos y POST /sincronizar (aprox. líneas 62–63, 114, 130–148, 153–171).
+
+Validación y limpieza de entrada de datos
+
+Carpeta / Archivo: src/app.js (y también src/controllers/reservaControlador.js)
+
+Dónde está:
+
+En src/app.js: funciones limpiarCliente y validarCliente (aprox. líneas 65–82), usadas en POST /clientes-locales y PUT /clientes-locales/:id (aprox. líneas 93–112) para filtrar campos, recortar espacios, validar longitud/formato y devolver 400 si hay error.
+
+En src/controllers/reservaControlador.js: funciones limpiar y validar (aprox. líneas 4–23), usadas en crear y actualizar (aprox. líneas 28–31, 74–76).
+
+Errores técnicos expuestos al usuario / cabecera X-Powered-By
+
+Carpeta / Archivo: src/app.js
+
+Dónde está: app.disable('x-powered-by') (aprox. línea 20) para ocultar Express, y el middleware final de errores app.use((err, req, res, next) => ...) (aprox. líneas 208–219) para responder con mensajes genéricos (400/500) sin exponer el stacktrace.
+
+Bloque 4: Hardening — Pruebas en Postman
+Validación de entrada (POST /clientes-locales):
+
+Petición inválida: POST http://localhost:3000/clientes-locales con body { "nombre": "", "telefono": "abc", "id": 999 } → responde 400 Bad Request y no guarda el registro.
+
+Petición válida: POST http://localhost:3000/clientes-locales con body { "nombre": "Pedro Gómez", "telefono": "3001234567" } → responde 201 Created y guarda el cliente.
+
+Autenticación en PUT /reservas/:id:
+
+Sin clave: PUT http://localhost:3000/reservas/ID (reemplazando ID por uno existente) con body { "estado": "cancelada" } y sin headers → responde 401 Unauthorized (Solo el barbero puede hacer esto).
+
+Con clave: agrega en Headers la clave x-clave-barbero con el valor de tu .env y envía de nuevo → responde 200 OK (luego desmarca el header para dejarlo limpio).
+
+Errores técnicos / JSON roto (POST /clientes-locales):
+
+Método y URL: POST http://localhost:3000/clientes-locales
+
+Body (raw JSON): { "nombre":
+
+Resultado esperado: responde 400 Bad Request con { "error": "El JSON enviado no es válido" }, sin stacktrace en la respuesta de Postman, y el detalle completo queda en logs/app.log con [ERROR].

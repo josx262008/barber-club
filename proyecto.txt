@@ -5,136 +5,303 @@ const path = require('path');
 const apiService = require('./services/apiService');
 const reservaService = require('./services/reservaService');
 const notificadorService = require('./services/notificadorService');
-// FÃ¡bricas de controladores
+// Importo el servicio que copia los datos de las APIs a la base de datos
+const sincronizarService = require('./services/sincronizarService');
+// Fábricas de controladores
 const crearControlador = require('./controllers/controlador');
 const crearReservaControlador = require('./controllers/reservaControlador');
 const AppDataSource = require('./database/data-source');
+// Importo mi logger para poder escribir registros desde este archivo
+const logger = require('./logger');
 
 const app = express();
-// InyecciÃ³n de dependencias
+// Inyección de dependencias
 const controlador = crearControlador(apiService);
 const reservas = crearReservaControlador(reservaService, notificadorService);
 
-// Entiende JSON en el cuerpo de las peticiones y muestra la pÃ¡gina de public
+// Oculto el encabezado que dice que uso Express
+app.disable('x-powered-by');
+
+// Registro de cada petición: método, ruta, código HTTP y tiempo que tardó
+app.use((req, res, next) => {
+  const inicio = Date.now();
+  res.on('finish', () => {
+    logger.info(`${req.method} ${req.originalUrl} ${res.statusCode} ${Date.now() - inicio}ms`);
+  });
+  next();
+});
+
+// Endpoint de salud: sirve para saber si el servidor está vivo
+app.get('/health', (req, res) => {
+  // Respondo con el estado y la hora actual
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Entiende JSON en el cuerpo de las peticiones y muestra la página de public
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '..', 'public')));
+
+// Protección: solo deja pasar si llega la clave del barbero (guardada en el .env, no en el código)
+function soloBarbero(req, res, next) {
+  const clave = req.get('x-clave-barbero');
+  if (!process.env.CLAVE_BARBERO || clave !== process.env.CLAVE_BARBERO) {
+    return res.status(401).json({ error: 'Solo el barbero puede hacer esto' });
+  }
+  next();
+}
+
+// El barbero entra con su clave; si es correcta, la página muestra los botones de administración
+app.post('/login-barbero', (req, res) => {
+  const clave = (req.body || {}).clave;
+  if (process.env.CLAVE_BARBERO && clave === process.env.CLAVE_BARBERO) {
+    return res.json({ ok: true });
+  }
+  res.status(401).json({ error: 'Clave incorrecta' });
+});
 
 // Reto 1: datos de las APIs externas
 app.get('/clientes', controlador.clientes);
 app.get('/citas', controlador.citas);
 app.get('/servicios', controlador.servicios);
 
-// Reto 2: CRUD de reservas en mi base de datos
+// Reto 2: CRUD de reservas (cualquiera crea y lee; modificar y borrar es solo del barbero)
 app.post('/reservas', reservas.crear);
 app.get('/reservas', reservas.listar);
 app.get('/reservas/:id', reservas.obtener);
-app.put('/reservas/:id', reservas.actualizar);
-app.delete('/reservas/:id', reservas.eliminar);
+app.put('/reservas/:id', soloBarbero, reservas.actualizar);
+app.delete('/reservas/:id', soloBarbero, reservas.eliminar);
+// Toma solo los campos permitidos de un cliente y les quita los espacios
+function limpiarCliente(cuerpo) {
+  const datos = {};
+  ['nombre', 'telefono'].forEach((campo) => {
+    if (typeof cuerpo[campo] === 'string') datos[campo] = cuerpo[campo].trim();
+  });
+  return datos;
+}
 
-// --- CLIENTES LOCALES ---
+// Devuelve un mensaje de error, o null si todo está bien
+// completo = true exige el nombre (se usa al crear)
+function validarCliente(datos, completo) {
+  if (completo && !datos.nombre) return 'Falta el campo obligatorio: nombre';
+  if ('nombre' in datos && (datos.nombre.length < 2 || datos.nombre.length > 60)) {
+    return 'El nombre debe tener entre 2 y 60 caracteres';
+  }
+  if (datos.telefono && !/^[0-9+().\-\sxX]{7,25}$/.test(datos.telefono)) {
+    return 'El teléfono no es válido (solo números, de 7 a 25 caracteres)';
+  }
+  return null;
+}
+
+// --- CLIENTES LOCALES (cualquiera agrega y edita; borrar es solo del barbero) ---
 app.get('/clientes-locales', async (req, res) => {
   try {
     const clienteRepo = AppDataSource.getRepository('Cliente');
-    const clientesLocales = await clienteRepo.find();
-    res.json(clientesLocales);
+    res.json(await clienteRepo.find());
   } catch (error) {
-    console.error('Error al obtener clientes locales:', error);
+    logger.fallo('Error al obtener clientes locales:', error);
     res.status(500).json({ error: 'Error al obtener clientes locales' });
   }
 });
 
 app.post('/clientes-locales', async (req, res) => {
   try {
+    // Dejo solo los campos permitidos (nombre y telefono) y los limpio
+    const datos = limpiarCliente(req.body || {});
+    // Reviso las reglas: nombre obligatorio, largo correcto y teléfono válido
+    const error = validarCliente(datos, true);
+    // Si hay un problema, respondo 400 y NO guardo nada
+    if (error) return res.status(400).json({ error });
     const clienteRepo = AppDataSource.getRepository('Cliente');
-    const nuevoCliente = clienteRepo.create(req.body);
-    const resultado = await clienteRepo.save(nuevoCliente);
+    // Guardo los datos ya limpios, no el req.body original
+    const resultado = await clienteRepo.save(clienteRepo.create(datos));
     res.status(201).json(resultado);
   } catch (error) {
-    console.error('Error al crear cliente local:', error);
+    logger.fallo('Error al crear cliente local:', error);
     res.status(500).json({ error: 'Error al crear cliente local' });
   }
 });
-
 app.put('/clientes-locales/:id', async (req, res) => {
   try {
-    const repo = AppDataSource.getRepository('Cliente');
-    await repo.update(req.params.id, req.body);
-    res.json({ mensaje: 'Cliente actualizado con Ã©xito' });
+    // Dejo solo los campos permitidos y los limpio
+    const datos = limpiarCliente(req.body || {});
+    // Valido con completo = false: al editar no se exigen todos los campos
+    const error = validarCliente(datos, false);
+    // Si hay un problema, respondo 400 y NO modifico nada
+    if (error) return res.status(400).json({ error });
+    await AppDataSource.getRepository('Cliente').update(req.params.id, datos);
+    res.json({ mensaje: 'Cliente actualizado con éxito' });
   } catch (error) {
     res.status(500).json({ error: 'Error al actualizar cliente' });
   }
 });
 
-app.delete('/clientes-locales/:id', async (req, res) => {
+app.delete('/clientes-locales/:id', soloBarbero, async (req, res) => {
   try {
-    const repo = AppDataSource.getRepository('Cliente');
-    await repo.delete(req.params.id);
-    res.json({ mensaje: 'Cliente eliminado con Ã©xito' });
+    await AppDataSource.getRepository('Cliente').delete(req.params.id);
+    res.json({ mensaje: 'Cliente eliminado con éxito' });
   } catch (error) {
     res.status(500).json({ error: 'Error al eliminar cliente' });
   }
 });
 
-// --- SERVICIOS LOCALES ---
+// --- SERVICIOS LOCALES (leer es de todos; agregar, editar y borrar es solo del barbero) ---
 app.get('/servicios-locales', async (req, res) => {
   try {
     const servicioRepo = AppDataSource.getRepository('Servicio');
-    const serviciosLocales = await servicioRepo.find();
-    res.json(serviciosLocales);
+    res.json(await servicioRepo.find());
   } catch (error) {
-    console.error('Error al obtener servicios locales:', error);
+    logger.fallo('Error al obtener servicios locales:', error);
     res.status(500).json({ error: 'Error al obtener servicios locales' });
   }
 });
 
-app.post('/servicios-locales', async (req, res) => {
+app.post('/servicios-locales', soloBarbero, async (req, res) => {
   try {
     const servicioRepo = AppDataSource.getRepository('Servicio');
-    const nuevoServicio = servicioRepo.create(req.body);
-    const resultado = await servicioRepo.save(nuevoServicio);
+    const resultado = await servicioRepo.save(servicioRepo.create(req.body));
     res.status(201).json(resultado);
   } catch (error) {
-    console.error('Error al crear servicio local:', error);
+    logger.fallo('Error al crear servicio local:', error);
     res.status(500).json({ error: 'Error al crear servicio local' });
   }
 });
 
-app.put('/servicios-locales/:id', async (req, res) => {
+app.put('/servicios-locales/:id', soloBarbero, async (req, res) => {
   try {
-    const repo = AppDataSource.getRepository('Servicio');
-    await repo.update(req.params.id, req.body);
-    res.json({ mensaje: 'Servicio actualizado con Ã©xito' });
+    await AppDataSource.getRepository('Servicio').update(req.params.id, req.body);
+    res.json({ mensaje: 'Servicio actualizado con éxito' });
   } catch (error) {
-    console.error('Error al actualizar servicio:', error);
+    logger.fallo('Error al actualizar servicio:', error);
     res.status(500).json({ error: 'Error al actualizar servicio' });
   }
 });
 
-app.delete('/servicios-locales/:id', async (req, res) => {
+app.delete('/servicios-locales/:id', soloBarbero, async (req, res) => {
   try {
-    const repo = AppDataSource.getRepository('Servicio');
-    await repo.delete(req.params.id);
-    res.json({ mensaje: 'Servicio eliminado con Ã©xito' });
+    await AppDataSource.getRepository('Servicio').delete(req.params.id);
+    res.json({ mensaje: 'Servicio eliminado con éxito' });
   } catch (error) {
-    console.error('Error al eliminar servicio:', error);
+    logger.fallo('Error al eliminar servicio:', error);
     res.status(500).json({ error: 'Error al eliminar servicio' });
   }
 });
 
-// Conecto la base de datos y enciendo el servidor
-AppDataSource.initialize()
-  .then(() => app.listen(3000, () => console.log('Servidor en http://localhost:3000')))
-  .catch((error) => console.error('No se pudo conectar a la base de datos:', error));
+// --- BORRAR TODOS LOS DATOS LOCALES (solo el barbero) ---
+app.delete('/datos', soloBarbero, async (req, res) => {
+  try {
+    // clear() vacía la tabla completa
+    await AppDataSource.getRepository('Cita').clear();
+    await AppDataSource.getRepository('Servicio').clear();
+    await AppDataSource.getRepository('Cliente').clear();
+    res.json({ mensaje: 'Datos locales borrados' });
+  } catch (error) {
+    logger.fallo('Error al borrar los datos:', error);
+    res.status(500).json({ error: 'No se pudieron borrar los datos' });
+  }
+});
+
+// --- SINCRONIZAR: copia los datos de las APIs a la base de datos (solo el barbero) ---
+// Ruta POST /sincronizar; soloBarbero revisa que llegue la clave antes de dejar pasar
+app.post('/sincronizar', soloBarbero, async (req, res) => {
+  try {
+    // Ejecuto la sincronización y espero el resumen de lo que se guardó
+    const resumen = await sincronizarService.sincronizar();
+    // Respondo con un mensaje y la cantidad guardada de cada tipo
+    res.json({ mensaje: 'Datos de las APIs guardados en la base de datos', guardados: resumen });
+  } catch (error) {
+    // Si algo falla, muestro el error en la terminal
+    logger.fallo('Error en /sincronizar:', error.message);
+    // Y respondo con error 500 para avisar que no se pudo
+    res.status(500).json({ error: 'No se pudo sincronizar' });
+  }
+});
+
+
+// Si ninguna ruta coincide, respondo 404 con un mensaje simple
+app.use((req, res) => {
+  res.status(404).json({ error: 'Ruta no encontrada' });
+});
+
+// Manejo de errores: el detalle va al log y al usuario solo le llega un mensaje genérico
+app.use((err, req, res, next) => {
+  // Registro el error completo con su stacktrace en el log (nivel ERROR)
+  logger.fallo('Error en ' + req.method + ' ' + req.originalUrl, err);
+  // Si el JSON venía mal escrito, es un error del cliente: 400
+  if (err.type === 'entity.parse.failed') {
+    return res.status(400).json({ error: 'El JSON enviado no es válido' });
+  }
+  // Cualquier otro error: 500 con un mensaje genérico, sin detalles técnicos
+  res.status(500).json({ error: 'Error interno del servidor' });
+});
+
+
+
+
+
+// Solo enciendo el servidor si ejecuto este archivo directamente (node src/app.js).
+// Cuando una prueba importa app.js, no se enciende nada.
+if (require.main === module) {
+  // Conecto la base de datos, traigo los datos de las APIs y luego enciendo el servidor
+  AppDataSource.initialize()
+    .then(async () => {
+      // Copio los datos de las APIs a la base de datos (no repite los que ya existen)
+      const resumen = await sincronizarService.sincronizar();
+      // Muestro en la terminal cuántos registros nuevos se guardaron
+      console.log('Sincronización inicial:', resumen);
+      // Enciendo el servidor
+      app.listen(3000, () => console.log('Servidor en http://localhost:3000'));
+    })
+    .catch((error) => logger.fallo('No se pudo conectar a la base de datos:', error));
+}
+
+// Exporto la app para que las pruebas de integración puedan usarla
+module.exports = app;
+
+===== src\logger.js =====
+// Importo winston, la librería que me deja escribir logs con niveles (info, error)
+const winston = require('winston');
+// Importo fs para poder crear la carpeta donde se guardan los logs
+const fs = require('fs');
+
+// Si la carpeta logs no existe, la creo
+if (!fs.existsSync('logs')) fs.mkdirSync('logs');
+
+// Creo el logger con su configuración
+const logger = winston.createLogger({
+  // Nivel mínimo que se registra: info y todo lo más grave (como error)
+  level: 'info',
+  // Formato de cada línea: fecha, nivel en mayúscula y mensaje
+  format: winston.format.combine(
+    winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+    winston.format.printf(({ timestamp, level, message }) => `${timestamp} [${level.toUpperCase()}] ${message}`)
+  ),
+  // Dónde se escriben los logs: en la terminal y en el archivo logs/app.log
+  transports: [
+    new winston.transports.Console(),
+    new winston.transports.File({ filename: 'logs/app.log' })
+  ]
+});
+
+// Función para registrar un error con su stacktrace completo (nivel ERROR)
+logger.fallo = (mensaje, error) => {
+  // Si el error trae stack lo uso; si no, lo convierto a texto
+  const detalle = error && error.stack ? error.stack : String(error);
+  // Escribo el mensaje y debajo el stacktrace
+  logger.error(mensaje + '\n' + detalle);
+};
+
+// Exporto el logger para usarlo en otros archivos
+module.exports = logger;
 
 ===== src\controllers\controlador.js =====
-// InyecciÃ³n de dependencias: el controlador no crea su propio servicio,
-// lo recibe como parÃ¡metro desde afuera. Lo hice asÃ­ para que el controlador
+// Inyección de dependencias: el controlador no crea su propio servicio,
+// lo recibe como parámetro desde afuera. Lo hice así para que el controlador
 // no quede pegado a la API real, y en las pruebas pueda pasarle un servicio
 // falso (mock) sin conectarme a internet.
 
 
 
-// FÃ¡brica del controlador: recibe el servicio (real o falso en las pruebas)
+// Fábrica del controlador: recibe el servicio (real o falso en las pruebas)
 function crearControlador(servicio) {
   return {
     // Se ejecuta cuando alguien pide /clientes
@@ -195,18 +362,18 @@ function validar(datos, completo) {
     }
   }
   for (const campo of ['clienteNombre', 'servicio', 'fechaHora']) {
-    if (campo in datos && !datos[campo]) return 'El campo ' + campo + ' no puede estar vacÃ­o';
+    if (campo in datos && !datos[campo]) return 'El campo ' + campo + ' no puede estar vacío';
   }
   if (datos.estado && !ESTADOS.includes(datos.estado)) {
-    return 'Estado no vÃ¡lido. Usa: ' + ESTADOS.join(', ');
+    return 'Estado no válido. Usa: ' + ESTADOS.join(', ');
   }
   return null;
 }
 
-// InyecciÃ³n de dependencias: recibe el servicio de la base y el notificador desde afuera
+// Inyección de dependencias: recibe el servicio de la base y el notificador desde afuera
 function crearReservaControlador(servicio, notificador) {
   return {
-    // POST /reservas: guarda en la base y luego envÃ­a a la API externa
+    // POST /reservas: guarda en la base y luego envía a la API externa
     crear: async (req, res) => {
       try {
         const datos = limpiar(req.body || {});
@@ -214,7 +381,7 @@ function crearReservaControlador(servicio, notificador) {
         if (error) return res.status(400).json({ error });
         // Paso 1: guardo en la base de datos
         const reserva = await servicio.crear(datos);
-        // Paso 2: envÃ­o a la API externa; si falla, la reserva igual queda guardada
+        // Paso 2: envío a la API externa; si falla, la reserva igual queda guardada
         let notificacion = 'no enviada';
         try {
           const externo = await notificador.notificar(reserva);
@@ -242,7 +409,7 @@ function crearReservaControlador(servicio, notificador) {
     obtener: async (req, res) => {
       try {
         const id = Number(req.params.id);
-        if (!Number.isInteger(id)) return res.status(400).json({ error: 'El id debe ser un nÃºmero' });
+        if (!Number.isInteger(id)) return res.status(400).json({ error: 'El id debe ser un número' });
         const reserva = await servicio.obtener(id);
         if (!reserva) return res.status(404).json({ error: 'Reserva no encontrada' });
         res.json(reserva);
@@ -256,7 +423,7 @@ function crearReservaControlador(servicio, notificador) {
     actualizar: async (req, res) => {
       try {
         const id = Number(req.params.id);
-        if (!Number.isInteger(id)) return res.status(400).json({ error: 'El id debe ser un nÃºmero' });
+        if (!Number.isInteger(id)) return res.status(400).json({ error: 'El id debe ser un número' });
         const datos = limpiar(req.body || {});
         const error = validar(datos, false);
         if (error) return res.status(400).json({ error });
@@ -273,7 +440,7 @@ function crearReservaControlador(servicio, notificador) {
     eliminar: async (req, res) => {
       try {
         const id = Number(req.params.id);
-        if (!Number.isInteger(id)) return res.status(400).json({ error: 'El id debe ser un nÃºmero' });
+        if (!Number.isInteger(id)) return res.status(400).json({ error: 'El id debe ser un número' });
         const reserva = await servicio.eliminar(id);
         if (!reserva) return res.status(404).json({ error: 'Reserva no encontrada' });
         res.json({ mensaje: 'Reserva eliminada', id });
@@ -288,69 +455,69 @@ function crearReservaControlador(servicio, notificador) {
 module.exports = crearReservaControlador;
 
 ===== src\database\data-source.js =====
-// reflect-metadata es una librerÃ­a que TypeORM necesita para funcionar
+// reflect-metadata es una librería que TypeORM necesita para funcionar
 require('reflect-metadata');
-// Importo DataSource, la clase que maneja la conexiÃ³n a la base de datos
+// Importo DataSource, la clase que maneja la conexión a la base de datos
 const { DataSource } = require('typeorm');
-// Importo las descripciones de las tablas que creÃ©
+// Importo las descripciones de las tablas que creé
 const Cliente = require('../entities/Cliente');
 const Servicio = require('../entities/Servicio');
 const Cita = require('../entities/Cita');
 
-// Creo la conexiÃ³n con su configuraciÃ³n
+// Creo la conexión con su configuración
 const AppDataSource = new DataSource({
   // Tipo de base de datos que uso: SQLite
   type: 'better-sqlite3',
-  // Nombre del archivo donde se va a guardar la base de datos
-  database: 'barberia.sqlite',
+  // En las pruebas uso una base en memoria (se borra sola); si no, el archivo de siempre
+  database: process.env.NODE_ENV === 'test' ? ':memory:' : 'barberia.sqlite',
   // synchronize: true hace que el ORM cree las tablas solo, sin CREATE TABLE
   synchronize: true,
   // Lista de tablas que el ORM debe crear
   entities: [Cliente, Servicio, Cita]
 });
 
-// Exporto la conexiÃ³n para usarla en otros archivos
+// Exporto la conexión para usarla en otros archivos
 module.exports = AppDataSource;
 
 ===== src\database\iniciar.js =====
-// Importo la conexiÃ³n que configurÃ© en data-source.js
+// Importo la conexión que configuré en data-source.js
 const AppDataSource = require('./data-source');
 
-// initialize() enciende la conexiÃ³n; en ese momento el ORM crea las tablas
+// initialize() enciende la conexión; en ese momento el ORM crea las tablas
 AppDataSource.initialize()
-  // .then se ejecuta si todo saliÃ³ bien
+  // .then se ejecuta si todo salió bien
   .then(async () => {
     // Muestro un mensaje en la terminal para confirmar
     console.log('Base de datos lista, tablas creadas por el ORM');
-    // Cierro la conexiÃ³n porque este script solo sirve para crear las tablas
+    // Cierro la conexión porque este script solo sirve para crear las tablas
     await AppDataSource.destroy();
   })
-  // .catch se ejecuta si algo fallÃ³, y muestra el error en la terminal
+  // .catch se ejecuta si algo falló, y muestra el error en la terminal
   .catch((error) => console.error('Error al conectar:', error));
 
 ===== src\entities\Cita.js =====
 // Importo EntitySchema para describir la tabla
 const { EntitySchema } = require('typeorm');
 
-// Exporto la descripciÃ³n de la tabla citas (las reservas de la barberÃ­a)
+// Exporto la descripción de la tabla citas (las reservas de la barbería)
 module.exports = new EntitySchema({
   // Nombre interno de la entidad
   name: 'Cita',
-  // Nombre que tendrÃ¡ la tabla en la base de datos
+  // Nombre que tendrá la tabla en la base de datos
   tableName: 'citas',
   // Columnas de la tabla
   columns: {
-    // id: nÃºmero Ãºnico, llave primaria, generado automÃ¡ticamente
+    // id: número único, llave primaria, generado automáticamente
     id: { type: Number, primary: true, generated: true },
     // clienteNombre: nombre de quien aparta la cita (obligatorio)
     clienteNombre: { type: String },
-    // telefono: telÃ©fono del cliente; nullable = puede quedar vacÃ­o
+    // telefono: teléfono del cliente; nullable = puede quedar vacío
     telefono: { type: String, nullable: true },
-    // servicio: quÃ© se va a hacer, por ejemplo "Corte de cabello" (obligatorio)
+    // servicio: qué se va a hacer, por ejemplo "Corte de cabello" (obligatorio)
     servicio: { type: String },
     // fechaHora: fecha y hora de la cita, guardada como texto (obligatorio)
     fechaHora: { type: String },
-    // estado: cÃ³mo va la cita; si no se dice nada, queda como "pendiente"
+    // estado: cómo va la cita; si no se dice nada, queda como "pendiente"
     estado: { type: String, default: 'pendiente' }
   }
 });
@@ -359,20 +526,20 @@ module.exports = new EntitySchema({
 // Importo EntitySchema, la herramienta de TypeORM para describir una tabla
 const { EntitySchema } = require('typeorm');
 
-// Exporto la descripciÃ³n de la tabla para usarla en otros archivos
+// Exporto la descripción de la tabla para usarla en otros archivos
 module.exports = new EntitySchema({
-  // Nombre interno de la entidad (la "clase" en mi cÃ³digo)
+  // Nombre interno de la entidad (la "clase" en mi código)
   name: 'Cliente',
   // Nombre real que va a tener la tabla en la base de datos
   tableName: 'clientes',
-  // AquÃ­ van las columnas de la tabla
+  // Aquí van las columnas de la tabla
   columns: {
-    // id: nÃºmero Ãºnico de cada cliente; primary = es la llave primaria (PK)
+    // id: número único de cada cliente; primary = es la llave primaria (PK)
     // generated = la base de datos lo asigna sola (1, 2, 3...)
     id: { type: Number, primary: true, generated: true },
     // nombre: texto, y es obligatorio
     nombre: { type: String },
-    // telefono: texto; nullable = puede quedar vacÃ­o si no se tiene
+    // telefono: texto; nullable = puede quedar vacío si no se tiene
     telefono: { type: String, nullable: true }
   }
 });
@@ -381,19 +548,19 @@ module.exports = new EntitySchema({
 // Importo EntitySchema para describir la tabla
 const { EntitySchema } = require('typeorm');
 
-// Exporto la descripciÃ³n de la tabla servicios
+// Exporto la descripción de la tabla servicios
 module.exports = new EntitySchema({
   // Nombre interno de la entidad
   name: 'Servicio',
-  // Nombre que tendrÃ¡ la tabla en la base de datos
+  // Nombre que tendrá la tabla en la base de datos
   tableName: 'servicios',
   // Columnas de la tabla
   columns: {
-    // id: nÃºmero Ãºnico, llave primaria, generado automÃ¡ticamente
+    // id: número único, llave primaria, generado automáticamente
     id: { type: Number, primary: true, generated: true },
     // nombre del servicio, por ejemplo "Corte de cabello"
     nombre: { type: String },
-    // precio del servicio; 'float' guarda nÃºmeros con decimales
+    // precio del servicio; 'float' guarda números con decimales
     precio: { type: 'float' },
     // activo: true si el servicio se sigue ofreciendo; por defecto es true
     activo: { type: Boolean, default: true }
@@ -401,30 +568,30 @@ module.exports = new EntitySchema({
 });
 
 ===== src\services\apiService.js =====
-// Cargo las variables del archivo .env (ahÃ­ estÃ¡ mi clave de Cal.com, fuera del cÃ³digo)
+// Cargo las variables del archivo .env (ahí está mi clave de Cal.com, fuera del código)
 require('dotenv').config();
-// Importo axios, la librerÃ­a que me deja hacer peticiones a internet
+// Importo axios, la librería que me deja hacer peticiones a internet
 const axios = require('axios');
 
-// DirecciÃ³n base de JSONPlaceholder, la API de datos de prueba que uso para los clientes
+// Dirección base de JSONPlaceholder, la API de datos de prueba que uso para los clientes
 const URL_BASE = 'https://jsonplaceholder.typicode.com';
-// DirecciÃ³n base de la API de Cal.com, que uso para los servicios y las citas
+// Dirección base de la API de Cal.com, que uso para los servicios y las citas
 const URL_CAL = 'https://api.cal.com/v2';
 
-// FunciÃ³n que arma los encabezados que Cal.com exige; recibe la versiÃ³n de la API a usar
+// Función que arma los encabezados que Cal.com exige; recibe la versión de la API a usar
 function encabezadosCal(version) {
   // Devuelvo un objeto con los dos encabezados
   return {
-    // Authorization: aquÃ­ va mi clave. "Bearer" es la forma en que Cal.com espera recibirla,
+    // Authorization: aquí va mi clave. "Bearer" es la forma en que Cal.com espera recibirla,
     // y process.env.CAL_API_KEY es el valor guardado en el archivo .env
     Authorization: 'Bearer ' + process.env.CAL_API_KEY,
-    // cal-api-version: le digo a Cal.com quÃ© versiÃ³n de su API quiero usar
+    // cal-api-version: le digo a Cal.com qué versión de su API quiero usar
     'cal-api-version': version
   };
 }
 
-// FunciÃ³n que trae la lista de clientes de prueba
-// async porque pedir datos por internet tarda y la funciÃ³n tiene que esperar
+// Función que trae la lista de clientes de prueba
+// async porque pedir datos por internet tarda y la función tiene que esperar
 async function obtenerClientes() {
   // await = espera a que JSONPlaceholder responda; pido /users y no mando clave porque no la pide
   const respuesta = await axios.get(`${URL_BASE}/users`);
@@ -432,23 +599,23 @@ async function obtenerClientes() {
   return respuesta.data;
 }
 
-// FunciÃ³n que trae los servicios de la barberÃ­a (los tipos de evento de Cal.com)
+// Función que trae los servicios de la barbería (los tipos de evento de Cal.com)
 async function obtenerServicios() {
-  // Pido /event-types a Cal.com y le mando los encabezados con mi clave y la versiÃ³n 2024-06-14
+  // Pido /event-types a Cal.com y le mando los encabezados con mi clave y la versión 2024-06-14
   const respuesta = await axios.get(`${URL_CAL}/event-types`, { headers: encabezadosCal('2024-06-14') });
   // Cal.com mete la lista dentro de un campo llamado "data"; la guardo en esta variable
   const datos = respuesta.data.data;
-  // Si lo que llegÃ³ es una lista la devuelvo; si no, devuelvo una lista vacÃ­a para no romper la pÃ¡gina
+  // Si lo que llegó es una lista la devuelvo; si no, devuelvo una lista vacía para no romper la página
   return Array.isArray(datos) ? datos : [];
 }
 
-// FunciÃ³n que trae las citas apartadas (las reservas de Cal.com)
+// Función que trae las citas apartadas (las reservas de Cal.com)
 async function obtenerCitas() {
-  // Pido /bookings a Cal.com con mi clave; esta ruta pide la versiÃ³n 2026-05-01
+  // Pido /bookings a Cal.com con mi clave; esta ruta pide la versión 2026-05-01
   const respuesta = await axios.get(`${URL_CAL}/bookings`, { headers: encabezadosCal('2026-05-01') });
-  // La lista de reservas tambiÃ©n viene dentro del campo "data"
+  // La lista de reservas también viene dentro del campo "data"
   const datos = respuesta.data.data;
-  // Devuelvo la lista, o una vacÃ­a si no llegÃ³ una lista
+  // Devuelvo la lista, o una vacía si no llegó una lista
   return Array.isArray(datos) ? datos : [];
 }
 
@@ -459,10 +626,10 @@ module.exports = { obtenerClientes, obtenerServicios, obtenerCitas };
 // Importo axios para hacer peticiones a internet
 const axios = require('axios');
 
-// DirecciÃ³n base de la API externa (JSONPlaceholder acepta POST de prÃ¡ctica)
+// Dirección base de la API externa (JSONPlaceholder acepta POST de práctica)
 const URL_BASE = 'https://jsonplaceholder.typicode.com';
 
-// EnvÃ­a los datos de la reserva a la API externa y devuelve su respuesta
+// Envía los datos de la reserva a la API externa y devuelve su respuesta
 async function notificar(reserva) {
   const respuesta = await axios.post(`${URL_BASE}/posts`, {
     title: 'Nueva reserva #' + reserva.id,
@@ -476,7 +643,7 @@ async function notificar(reserva) {
 module.exports = { notificar };
 
 ===== src\services\reservaService.js =====
-// ConexiÃ³n a la base de datos y descripciÃ³n de la tabla citas
+// Conexión a la base de datos y descripción de la tabla citas
 const AppDataSource = require('../database/data-source');
 const Cita = require('../entities/Cita');
 
@@ -511,22 +678,210 @@ async function eliminar(id) {
 
 module.exports = { listar, obtener, crear, actualizar, eliminar };
 
+===== src\services\sincronizarService.js =====
+// Importo la conexión a la base de datos (la misma que uso en app.js)
+const AppDataSource = require('../database/data-source');
+// Importo mi servicio de APIs, que ya sabe pedir los datos a Cal.com y JSONPlaceholder
+const apiService = require('./apiService');
+
+// Esta función traduce el estado que usa Cal.com al estado que usa mi tabla de citas
+function traducirEstado(estado) {
+  // Si Cal.com dice "accepted", en mi base queda como "confirmada"
+  if (estado === 'accepted') return 'confirmada';
+  // Si Cal.com dice "cancelled", en mi base queda como "cancelada"
+  if (estado === 'cancelled') return 'cancelada';
+  // Cualquier otro estado lo guardo como "pendiente"
+  return 'pendiente';
+}
+
+// Esta función trae los datos de las APIs y los guarda en la base de datos con el ORM
+async function sincronizar() {
+  // Objeto donde voy contando cuántos registros nuevos se guardaron de cada tipo
+  const resumen = { clientes: 0, servicios: 0, citas: 0 };
+
+  // ===== 1. CLIENTES (JSONPlaceholder -> tabla Cliente) =====
+  try {
+    // Pido al ORM el repositorio de Cliente (es el que me deja guardar y buscar clientes)
+    const repo = AppDataSource.getRepository('Cliente');
+    // Pido a la API externa la lista de clientes
+    const clientesApi = await apiService.obtenerClientes();
+    // Recorro uno por uno los clientes que trajo la API
+    for (const c of clientesApi) {
+      // Busco en mi base si ya existe un cliente con ese nombre (para no repetirlo)
+      const existe = await repo.findOneBy({ nombre: c.name });
+      // Si no existe, lo guardo
+      if (!existe) {
+        // create arma el cliente con mis columnas y save lo guarda en la base de datos
+        await repo.save(repo.create({ nombre: c.name, telefono: c.phone }));
+        // Sumo 1 al contador de clientes guardados
+        resumen.clientes++;
+      }
+    }
+  // Si algo falla (por ejemplo la API caída), muestro el error en la terminal y sigo con lo demás
+  } catch (e) { console.error('Error sincronizando clientes:', e.message); }
+
+  // ===== 2. SERVICIOS (Cal.com -> tabla Servicio) =====
+  try {
+    // Pido al ORM el repositorio de Servicio
+    const repo = AppDataSource.getRepository('Servicio');
+    // Pido a Cal.com la lista de servicios (tipos de evento)
+    const serviciosApi = await apiService.obtenerServicios();
+    // Recorro uno por uno los servicios que trajo la API
+    for (const s of serviciosApi) {
+      // Cal.com guarda el nombre en "title" (o en "name"); tomo el que exista
+      const nombre = s.title || s.name;
+      // Si el servicio no trae nombre, lo salto y paso al siguiente
+      if (!nombre) continue;
+      // Busco en mi base si ya existe un servicio con ese nombre
+      const existe = await repo.findOneBy({ nombre });
+      // Si no existe, lo guardo
+      if (!existe) {
+        // Cal.com no maneja precio en este endpoint, lo dejo en 0 para editarlo después
+        await repo.save(repo.create({ nombre, precio: 0, activo: true }));
+        // Sumo 1 al contador de servicios guardados
+        resumen.servicios++;
+      }
+    }
+  // Si algo falla, muestro el error en la terminal y sigo con lo demás
+  } catch (e) { console.error('Error sincronizando servicios:', e.message); }
+
+  // ===== 3. CITAS (Cal.com -> tabla Cita) =====
+  try {
+    // Pido al ORM el repositorio de Cita (ahí guardo las reservas)
+    const repo = AppDataSource.getRepository('Cita');
+    // Pido a Cal.com la lista de citas
+    const citasApi = await apiService.obtenerCitas();
+    // Recorro una por una las citas que trajo la API
+    for (const c of citasApi) {
+      // El nombre del cliente viene dentro de "attendees"; si no hay, pongo un texto por defecto
+      const clienteNombre = c.attendees && c.attendees[0] ? c.attendees[0].name : 'Cliente sin nombre';
+      // El servicio es el título de la cita; si no trae título, pongo un texto por defecto
+      const servicio = c.title || 'Cita de Cal.com';
+      // La fecha y hora de inicio de la cita viene en "start"
+      const fechaHora = c.start;
+      // Busco si ya guardé esa misma cita (mismo cliente, servicio y fecha) para no repetirla
+      const existe = await repo.findOneBy({ clienteNombre, servicio, fechaHora });
+      // Si no existe, la guardo
+      if (!existe) {
+        // create arma la cita con mis columnas y save la guarda en la base de datos
+        await repo.save(repo.create({
+          clienteNombre,                         // nombre del cliente
+          telefono: '',                          // Cal.com no manda teléfono, lo dejo vacío
+          servicio,                              // nombre del servicio
+          fechaHora,                             // fecha y hora de la cita
+          estado: traducirEstado(c.status)       // estado traducido a los que usa mi proyecto
+        }));
+        // Sumo 1 al contador de citas guardadas
+        resumen.citas++;
+      }
+    }
+  // Si algo falla, muestro el error en la terminal
+  } catch (e) { console.error('Error sincronizando citas:', e.message); }
+
+  // Devuelvo el resumen con cuántos registros nuevos se guardaron de cada tipo
+  return resumen;
+}
+
+// Exporto la función para poder usarla desde app.js
+module.exports = { sincronizar };
+
+===== tests\integracion.test.js =====
+// Fuerzo el modo prueba: así la app usa la base de datos en memoria y no barberia.sqlite
+process.env.NODE_ENV = 'test';
+// Pongo una clave de barbero fija para las pruebas (antes de cargar la app)
+process.env.CLAVE_BARBERO = 'clave-de-prueba';
+
+// supertest hace peticiones a la app sin necesidad de encender el servidor
+const request = require('supertest');
+
+// Reemplazo el notificador por uno falso, para que las pruebas no llamen a internet
+jest.mock('../src/services/notificadorService', () => ({
+  notificar: jest.fn().mockResolvedValue({ id: 101 })
+}));
+
+// Importo la app completa (rutas, validaciones, controladores) y la conexión a la base
+const app = require('../src/app');
+const AppDataSource = require('../src/database/data-source');
+
+// Antes de todas las pruebas: enciendo la base de datos (en memoria, vacía)
+beforeAll(async () => {
+  await AppDataSource.initialize();
+});
+
+// Al terminar todas las pruebas: cierro la conexión
+afterAll(async () => {
+  await AppDataSource.destroy();
+});
+
+// Reserva de ejemplo que uso en las tres pruebas
+const reservaEjemplo = {
+  clienteNombre: 'Cliente Integracion',
+  telefono: '3001112233',
+  servicio: 'Corte de cabello',
+  fechaHora: '2026-12-01T10:00'
+};
+
+// Prueba 1: flujo Create completo
+test('Create: POST /reservas responde 201 y el dato queda en la base', async () => {
+  // Hago la petición POST como si fuera Postman
+  const res = await request(app).post('/reservas').send(reservaEjemplo);
+  // Verifico que respondió 201 (creado) y que devolvió un id
+  expect(res.status).toBe(201);
+  expect(res.body).toHaveProperty('id');
+  // Voy directo a la base de datos a confirmar que la reserva existe
+  const guardada = await AppDataSource.getRepository('Cita').findOneBy({ id: res.body.id });
+  expect(guardada).not.toBeNull();
+  expect(guardada.clienteNombre).toBe('Cliente Integracion');
+});
+
+// Prueba 2: flujo Read con dato real
+test('Read: GET /reservas/:id devuelve exactamente el dato guardado', async () => {
+  // Guardo una reserva directamente en la base de datos
+  const repo = AppDataSource.getRepository('Cita');
+  const guardada = await repo.save(repo.create(reservaEjemplo));
+  // La pido por su id a través de la API
+  const res = await request(app).get('/reservas/' + guardada.id);
+  // Verifico que respondió 200 y que trae exactamente esos datos
+  expect(res.status).toBe(200);
+  expect(res.body).toMatchObject({
+    id: guardada.id,
+    clienteNombre: 'Cliente Integracion',
+    servicio: 'Corte de cabello',
+    fechaHora: '2026-12-01T10:00'
+  });
+});
+
+// Prueba 3: flujo Delete
+test('Delete: DELETE /reservas/:id borra la reserva y el GET posterior responde 404', async () => {
+  // Creo una reserva para poder borrarla
+  const repo = AppDataSource.getRepository('Cita');
+  const guardada = await repo.save(repo.create(reservaEjemplo));
+  // La borro; el DELETE exige la clave del barbero en el encabezado
+  const borrado = await request(app)
+    .delete('/reservas/' + guardada.id)
+    .set('x-clave-barbero', 'clave-de-prueba');
+  expect(borrado.status).toBe(200);
+  // Pido la misma reserva otra vez: ya no debe existir
+  const despues = await request(app).get('/reservas/' + guardada.id);
+  expect(despues.status).toBe(404);
+});
+
 ===== tests\pruebas.test.js =====
 // Importo axios para poder simularlo (mock)
 const axios = require('axios');
 // Importo el servicio real, que es lo que voy a probar en la prueba 1
 const apiService = require('../src/services/apiService');
-// Importo la funciÃ³n que fabrica el controlador
+// Importo la función que fabrica el controlador
 const crearControlador = require('../src/controllers/controlador');
 
-// Le digo a Jest: reemplaza axios por una versiÃ³n falsa, asÃ­ no se llama a internet
+// Le digo a Jest: reemplaza axios por una versión falsa, así no se llama a internet
 jest.mock('axios');
 
-// Creo una respuesta falsa de Express para poder revisar quÃ© devuelve el controlador
+// Creo una respuesta falsa de Express para poder revisar qué devuelve el controlador
 function crearRes() {
-  // Objeto vacÃ­o que harÃ¡ de "res"
+  // Objeto vacío que hará de "res"
   const res = {};
-  // jest.fn() es una funciÃ³n espÃ­a: anota si la llamaron y con quÃ©
+  // jest.fn() es una función espía: anota si la llamaron y con qué
   // mockReturnValue(res) hace que devuelva el mismo objeto, para poder encadenar
   res.json = jest.fn().mockReturnValue(res);
   res.status = jest.fn().mockReturnValue(res);
@@ -535,11 +890,11 @@ function crearRes() {
 }
 
 // Prueba 1: el formato de los datos es correcto
-// test('nombre', funciÃ³n) define una prueba
+// test('nombre', función) define una prueba
 test('obtenerClientes retorna un array con campo id', async () => {
   // Le digo a axios falso que responda con una lista con una persona inventada
   axios.get.mockResolvedValue({ data: [{ id: 1, name: 'Ana' }] });
-  // Llamo a la funciÃ³n real del servicio, que usarÃ¡ el axios falso
+  // Llamo a la función real del servicio, que usará el axios falso
   const datos = await apiService.obtenerClientes();
   // expect = "espero que": reviso que lo devuelto sea un array
   expect(Array.isArray(datos)).toBe(true);
@@ -549,37 +904,37 @@ test('obtenerClientes retorna un array con campo id', async () => {
 
 // Prueba 2: manejo de errores
 test('el controlador devuelve un error claro cuando la API falla', async () => {
-  // Creo un servicio falso que siempre falla, simulando que la API se cayÃ³
+  // Creo un servicio falso que siempre falla, simulando que la API se cayó
   const servicioFalso = {
-    obtenerClientes: jest.fn().mockRejectedValue(new Error('API caÃ­da'))
+    obtenerClientes: jest.fn().mockRejectedValue(new Error('API caída'))
   };
-  // InyecciÃ³n: le entrego el servicio falso al controlador
+  // Inyección: le entrego el servicio falso al controlador
   const controlador = crearControlador(servicioFalso);
   // Creo el res falso para espiar la respuesta
   const res = crearRes();
-  // Ejecuto la funciÃ³n del controlador (req vacÃ­o porque no lo uso)
+  // Ejecuto la función del controlador (req vacío porque no lo uso)
   await controlador.clientes({}, res);
-  // Reviso que respondiÃ³ con cÃ³digo 500
+  // Reviso que respondió con código 500
   expect(res.status).toHaveBeenCalledWith(500);
-  // Reviso que mandÃ³ el mensaje de error claro
+  // Reviso que mandó el mensaje de error claro
   expect(res.json).toHaveBeenCalledWith({ error: 'No se pudieron obtener los clientes' });
 });
 
 // Prueba 3: el controlador funciona con un servicio simulado
 test('el controlador funciona con un servicio simulado', async () => {
-  // Datos inventados que devolverÃ¡ el servicio falso
+  // Datos inventados que devolverá el servicio falso
   const datosFalsos = [{ id: 1, title: 'Cita de prueba' }];
   // Servicio falso que responde bien con esos datos
   const servicioFalso = {
     obtenerCitas: jest.fn().mockResolvedValue(datosFalsos)
   };
-  // InyecciÃ³n: le paso el servicio falso en lugar del real
+  // Inyección: le paso el servicio falso en lugar del real
   const controlador = crearControlador(servicioFalso);
   // Creo el res falso
   const res = crearRes();
-  // Ejecuto la funciÃ³n citas del controlador
+  // Ejecuto la función citas del controlador
   await controlador.citas({}, res);
-  // Reviso que el controlador respondiÃ³ exactamente con esos datos
+  // Reviso que el controlador respondió exactamente con esos datos
   expect(res.json).toHaveBeenCalledWith(datosFalsos);
 });
 
@@ -587,50 +942,50 @@ test('el controlador funciona con un servicio simulado', async () => {
 /* Etiqueta roja para las citas canceladas */
 .cancelada { background: #4d1f1f; color: #f08a8a; }
 
-/* LÃ­nea que dice de dÃ³nde vienen los datos */
+/* Línea que dice de dónde vienen los datos */
 .fuente { color: #9a9a9a; font-size: 0.85rem; margin-bottom: 12px; }
 
 /* Enlace "Ver JSON" en dorado */
 .fuente a { color: #c9a24d; }
-/* Quito los mÃ¡rgenes que el navegador pone por defecto */
+/* Quito los márgenes que el navegador pone por defecto */
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
-/* Fondo oscuro y letra clara para toda la pÃ¡gina */
+/* Fondo oscuro y letra clara para toda la página */
 body {
   font-family: Arial, sans-serif;
   background: #121212;
   color: #f2f2f2;
 }
 
-/* Encabezado: centrado, con una lÃ­nea dorada abajo */
+/* Encabezado: centrado, con una línea dorada abajo */
 header {
   text-align: center;
   padding: 32px 16px;
   border-bottom: 3px solid #c9a24d;
 }
 
-/* El nombre de la barberÃ­a en dorado */
+/* El nombre de la barbería en dorado */
 header h1 { color: #c9a24d; font-size: 2rem; }
 
-/* El texto pequeÃ±o debajo del nombre, en gris */
+/* El texto pequeño debajo del nombre, en gris */
 header p { color: #9a9a9a; margin-top: 6px; }
 
-/* Contenido principal con un ancho mÃ¡ximo y centrado */
+/* Contenido principal con un ancho máximo y centrado */
 main { max-width: 1000px; margin: 0 auto; padding: 24px 16px; }
 
-/* SeparaciÃ³n entre las secciones */
+/* Separación entre las secciones */
 section { margin-bottom: 40px; }
 
-/* TÃ­tulos de secciÃ³n (Servicios, Clientes, Citas) */
+/* Títulos de sección (Servicios, Clientes, Citas) */
 h2 { color: #c9a24d; margin-bottom: 8px; }
 
-/* LÃ­nea que dice de dÃ³nde vienen los datos */
+/* Línea que dice de dónde vienen los datos */
 .fuente { color: #9a9a9a; font-size: 0.85rem; margin-bottom: 12px; }
 
 /* Enlace "Ver JSON" en dorado */
 .fuente a { color: #c9a24d; }
 
-/* Las tarjetas se acomodan solas en columnas segÃºn el ancho de la pantalla */
+/* Las tarjetas se acomodan solas en columnas según el ancho de la pantalla */
 .lista {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
@@ -645,13 +1000,13 @@ h2 { color: #c9a24d; margin-bottom: 8px; }
   padding: 16px;
 }
 
-/* Nombre o tÃ­tulo dentro de la tarjeta */
+/* Nombre o título dentro de la tarjeta */
 .tarjeta h3 { margin-bottom: 8px; font-size: 1.05rem; }
 
-/* LÃ­neas de texto de la tarjeta, en gris claro */
+/* Líneas de texto de la tarjeta, en gris claro */
 .tarjeta p { color: #bdbdbd; font-size: 0.9rem; margin-bottom: 4px; }
 
-/* Etiqueta pequeÃ±a con estado */
+/* Etiqueta pequeña con estado */
 .etiqueta {
   display: inline-block;
   margin-top: 8px;
@@ -670,7 +1025,7 @@ h2 { color: #c9a24d; margin-bottom: 8px; }
 /* Etiqueta roja para las citas canceladas */
 .cancelada { background: #4d1f1f; color: #f08a8a; }
 
-/* BotÃ³n "Pedir cita" dentro de cada servicio */
+/* Botón "Pedir cita" dentro de cada servicio */
 .boton-reservar {
   display: inline-block;
   margin-top: 12px;
@@ -692,128 +1047,151 @@ h2 { color: #c9a24d; margin-bottom: 8px; }
   <title>MVP Barber Club</title>
   <link rel="stylesheet" href="estilos.css">
   <style>
-    /* Estilos estÃ©ticos para los paneles de administraciÃ³n y formularios en la interfaz */
-    .panel-admin { background: #f4f4f4; padding: 15px; margin-bottom: 15px; border-radius: 8px; border: 1px solid #ddd; }
+    /* Paneles de formularios */
+    .panel-admin { background: #f4f4f4; padding: 15px; margin-bottom: 15px; border-radius: 8px; border: 1px solid #ddd; color: #222; }
     .panel-admin input, .panel-admin select { padding: 8px; margin-right: 5px; margin-bottom: 5px; width: 200px; }
     .panel-admin button { padding: 8px 12px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
     .panel-admin button:hover { background: #0056b3; }
-    .btn-refrescar { background: #28a745; margin-bottom: 10px; }
-    .btn-refrescar:hover { background: #218838; }
     .btn-accion { background: #ffc107; border: none; padding: 4px 8px; margin-left: 5px; cursor: pointer; border-radius: 3px; font-size: 12px; }
     .btn-eliminar { background: #dc3545; color: white; }
+    /* Lo que tiene esta clase solo se ve cuando el barbero entró */
+    .solo-barbero { display: none; }
+    body.modo-barbero .solo-barbero { display: block; }
   </style>
 </head>
 <body>
-  <!-- Encabezado principal de la aplicaciÃ³n web -->
   <header>
     <h1>MVP Barber Club</h1>
-    <p>Servicios, clientes y citas (GestiÃ³n Profesional)</p>
+    <p>Servicios, clientes y citas</p>
   </header>
 
   <main>
-    <!-- SECCIÃ“N DE SERVICIOS: Solo el administrador define precios y servicios -->
+    <!-- Entrada del barbero -->
+    <div class="panel-admin">
+      <span id="estado-barbero">Vista de cliente</span>
+      <button id="btn-barbero" onclick="alternarBarbero()">Soy el barbero</button>
+    </div>
+
+    <!-- Borrar todo: solo el barbero -->
+    <div class="panel-admin solo-barbero">
+      <button style="background:#dc3545" onclick="borrarTodo()">Borrar todos los datos de la base de datos</button>
+    </div>
+
+    <!-- Servicios: agregar, editar y borrar solo el barbero -->
     <section>
       <h2>Servicios</h2>
       <p class="fuente"><span id="fuente-servicios">Fuente: GET /servicios</span></p>
-      
-      <!-- Panel con el botÃ³n de actualizar y el formulario exclusivo del administrador -->
-      <div class="panel-admin">
-        <button class="btn-refrescar" onclick="cargarServicios()">ðŸ”„ Actualizar Servicios</button>
-        <form id="form-servicio" style="display:inline-block; margin-left:10px;" onsubmit="agregarServicio(event)">
+      <div class="panel-admin solo-barbero">
+        <form id="form-servicio" onsubmit="agregarServicio(event)">
           <input type="text" id="nombreServicio" placeholder="Nombre del servicio" required />
           <input type="number" id="precioServicio" placeholder="Precio ($)" required />
-          <button type="submit">âž• Agregar Servicio (Admin)</button>
+          <button type="submit">Agregar servicio</button>
         </form>
       </div>
-
-      <!-- Contenedor donde se pintarÃ¡n las tarjetas de servicios de forma dinÃ¡mica -->
       <div id="servicios" class="lista">Cargando servicios...</div>
     </section>
 
-    <!-- SECCIÃ“N DE CLIENTES: Listado y gestiÃ³n con control administrativo -->
+    <!-- Clientes: todos pueden registrarse y editar; borrar solo el barbero -->
     <section>
       <h2>Clientes</h2>
       <p class="fuente"><span id="fuente-clientes">Fuente: GET /clientes</span></p>
-      
-      <!-- Panel para registrar clientes y actualizar la vista -->
       <div class="panel-admin">
-        <button class="btn-refrescar" onclick="cargarClientes()">ðŸ”„ Actualizar Clientes</button>
-        <form id="form-cliente" style="display:inline-block; margin-left:10px;" onsubmit="agregarCliente(event)">
+        <form id="form-cliente" onsubmit="agregarCliente(event)">
           <input type="text" id="nombreCliente" placeholder="Nombre del cliente" required />
-          <input type="text" id="telefonoCliente" placeholder="TelÃ©fono" required />
-          <button type="submit">âž• Registrar Cliente</button>
+          <input type="text" id="telefonoCliente" placeholder="Teléfono" required />
+          <button type="submit">Registrar cliente</button>
         </form>
       </div>
-
-      <!-- Contenedor dinÃ¡mico de clientes -->
       <div id="clientes" class="lista">Cargando clientes...</div>
     </section>
 
-    <!-- SECCIÃ“N DE CITAS: Permite apartar citas eligiendo el servicio de un menÃº desplegable -->
+    <!-- Citas: todos pueden apartar; borrar solo el barbero -->
     <section>
       <h2>Citas</h2>
       <p class="fuente"><span id="fuente-citas">Fuente: GET /citas</span></p>
-      
-      <!-- Panel de agendamiento de citas -->
       <div class="panel-admin">
-        <button class="btn-refrescar" onclick="cargarCitas()">ðŸ”„ Actualizar Citas</button>
-        <form id="form-cita" style="display:inline-block; margin-left:10px;" onsubmit="agregarCita(event)">
+        <form id="form-cita" onsubmit="agregarCita(event)">
           <input type="text" id="clienteCita" placeholder="Nombre Cliente" required />
-          <input type="text" id="telCita" placeholder="TelÃ©fono" required />
-          
-          <!-- MenÃº desplegable (<select>) que se llena automÃ¡ticamente con los servicios disponibles -->
+          <input type="text" id="telCita" placeholder="Teléfono" required />
           <select id="servicioCita" required>
             <option value="">Seleccione un servicio...</option>
           </select>
-
           <input type="datetime-local" id="fechaCita" required />
-          <button type="submit">âž• Apartar Cita</button>
+          <button type="submit">Apartar cita</button>
         </form>
       </div>
-
-      <!-- Contenedor dinÃ¡mico de citas -->
       <div id="citas" class="lista">Cargando citas...</div>
     </section>
   </main>
 
-  <!-- Script principal de JavaScript que controla la lÃ³gica y la interacciÃ³n -->
   <script src="script.js"></script>
 </body>
 </html>
 
 ===== public\script.js =====
-// Usuario pÃºblico de mi Cal.com (es la parte de mi enlace: cal.com/ESTE-USUARIO/corte)
+// Usuario público de mi Cal.com (es la parte de mi enlace: cal.com/ESTE-USUARIO/corte)
 const USUARIO_CAL = 'jose-mestra-9j6nkc';
 
-// FunciÃ³n asÃ­ncrona genÃ©rica para pedir datos a cualquier ruta del servidor
+// Si el barbero ya entró en esta pestaña, su clave queda guardada aquí; si no, está vacía
+let claveBarbero = sessionStorage.getItem('claveBarbero') || '';
+// Devuelve true cuando el barbero está dentro
+function esBarbero() { return claveBarbero !== ''; }
+// Arma los encabezados; si es el barbero, manda su clave para que el servidor lo reconozca
+function cabeceras() {
+  const h = { 'Content-Type': 'application/json' };
+  if (esBarbero()) h['x-clave-barbero'] = claveBarbero;
+  return h;
+}
+
+// Muestra u oculta lo del barbero y cambia los textos de la barra
+function mostrarModo() {
+  document.body.classList.toggle('modo-barbero', esBarbero());
+  document.getElementById('estado-barbero').textContent = esBarbero() ? 'Modo barbero' : 'Vista de cliente';
+  document.getElementById('btn-barbero').textContent = esBarbero() ? 'Salir del modo barbero' : 'Soy el barbero';
+}
+
+// Botón "Soy el barbero": pide la clave y la comprueba con el servidor; si ya estaba dentro, sale
+async function alternarBarbero() {
+  if (esBarbero()) {
+    claveBarbero = '';
+    sessionStorage.removeItem('claveBarbero');
+  } else {
+    const clave = prompt('Clave del barbero:');
+    if (!clave) return;
+    const res = await fetch('/login-barbero', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clave }) });
+    if (!res.ok) { alert('Clave incorrecta'); return; }
+    claveBarbero = clave;
+    sessionStorage.setItem('claveBarbero', clave);
+  }
+  mostrarModo();
+  cargarTodo();
+}
+
+// Pide datos a mi API y devuelve el JSON
 async function pedir(ruta) {
   const respuesta = await fetch(ruta);
-  if (!respuesta.ok) throw new Error('El servidor respondiÃ³ con error');
+  if (!respuesta.ok) throw new Error('El servidor respondió con error');
   return respuesta.json();
 }
 
-// FunciÃ³n para crear dinÃ¡micamente un elemento de tarjeta HTML con sus datos
+// Arma una tarjeta con título, líneas de texto, etiqueta opcional y botón opcional
 function crearTarjeta(titulo, lineas, etiqueta, boton) {
   const tarjeta = document.createElement('article');
   tarjeta.className = 'tarjeta';
-
   const h3 = document.createElement('h3');
   h3.textContent = titulo;
   tarjeta.appendChild(h3);
-
   lineas.forEach((texto) => {
     const p = document.createElement('p');
     p.textContent = texto;
     tarjeta.appendChild(p);
   });
-
   if (etiqueta) {
     const span = document.createElement('span');
     span.className = 'etiqueta ' + etiqueta.clase;
     span.textContent = etiqueta.texto;
     tarjeta.appendChild(span);
   }
-
   if (boton) {
     const a = document.createElement('a');
     a.className = 'boton-reservar';
@@ -826,16 +1204,30 @@ function crearTarjeta(titulo, lineas, etiqueta, boton) {
   return tarjeta;
 }
 
-// FunciÃ³n para formatear fechas de texto a un formato legible en hora de Colombia
+// Crea un botón pequeño (editar o borrar)
+function crearBoton(texto, clase, accion) {
+  const b = document.createElement('button');
+  b.textContent = texto;
+  b.className = clase;
+  b.onclick = accion;
+  return b;
+}
+
+// Convierte una fecha en texto legible, en hora de Colombia
 function formatearFecha(texto) {
   const fecha = new Date(texto);
   if (isNaN(fecha)) return 'Fecha no disponible';
   return fecha.toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Bogota' });
 }
 
-// =========================================================================
-// SECCIÃ“N 1: CLIENTES (API externa + SQLite local + Botones Editar/Borrar)
-// =========================================================================
+// Si el servidor rechazó la acción (401), aviso que es solo del barbero
+function avisarSiRechazo(res, mensaje) {
+  if (res.status === 401) alert('Solo el barbero puede hacer esto');
+  else if (!res.ok) alert(mensaje);
+  return res.ok;
+}
+
+// ===== CLIENTES: todos agregan y editan; borrar solo el barbero =====
 async function cargarClientes() {
   const cont = document.getElementById('clientes');
   try {
@@ -843,59 +1235,39 @@ async function cargarClientes() {
       pedir('/clientes').catch(() => []),
       pedir('/clientes-locales').catch(() => [])
     ]);
-
-    const totalClientes = [...clientesApi, ...clientesLocales];
+    const total = [...clientesApi, ...clientesLocales];
     document.getElementById('fuente-clientes').textContent =
-      'Fuente: API externa + Base de datos SQLite Â· ' + totalClientes.length + ' registros recibidos';
-    
+      'Fuente: API externa + Base de datos SQLite · ' + total.length + ' registros recibidos';
     cont.textContent = '';
-    if (totalClientes.length === 0) { 
-      cont.textContent = 'TodavÃ­a no hay clientes registrados'; 
-      return; 
-    }
+    if (total.length === 0) { cont.textContent = 'Todavía no hay clientes registrados'; return; }
 
-    clientesApi.forEach((c) => {
-      cont.appendChild(crearTarjeta(c.name, [c.phone, c.email]));
-    });
+    clientesApi.forEach((c) => cont.appendChild(crearTarjeta(c.name, [c.phone, c.email])));
 
     clientesLocales.forEach((c) => {
-      const nombre = c.nombre || 'Cliente Local';
-      const telefono = c.telefono ? 'TelÃ©fono: ' + c.telefono : 'Sin telÃ©fono';
-      const idCliente = c.id || c.codigo || c.idCliente;
-      
-      const tarjeta = crearTarjeta(nombre, [telefono], { texto: 'BD Local', clase: 'atendida' });
+      const id = c.id;
+      const tarjeta = crearTarjeta(c.nombre || 'Cliente Local', [c.telefono ? 'Teléfono: ' + c.telefono : 'Sin teléfono'], { texto: 'BD Local', clase: 'atendida' });
 
-      const btnEditar = document.createElement('button');
-      btnEditar.textContent = 'âœï¸ Editar';
-      btnEditar.className = 'btn-accion';
-      btnEditar.onclick = async () => {
+      // Editar: lo puede hacer cualquiera
+      tarjeta.appendChild(crearBoton('Editar', 'btn-accion', async () => {
         const nuevoNombre = prompt('Nuevo nombre:', c.nombre);
-        const nuevoTelefono = prompt('Nuevo telÃ©fono:', c.telefono);
-        if (nuevoNombre && idCliente) {
-          await fetch('/clientes-locales/' + idCliente, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ nombre: nuevoNombre, telefono: nuevoTelefono })
-          });
-          cargarClientes();
+        const nuevoTelefono = prompt('Nuevo teléfono:', c.telefono);
+        if (nuevoNombre && id) {
+          const res = await fetch('/clientes-locales/' + id, { method: 'PUT', headers: cabeceras(), body: JSON.stringify({ nombre: nuevoNombre, telefono: nuevoTelefono }) });
+          if (avisarSiRechazo(res, 'No se pudo actualizar el cliente')) cargarClientes();
         }
-      };
+      }));
 
-      const btnBorrar = document.createElement('button');
-      btnBorrar.textContent = 'ðŸ—‘ï¸ Borrar';
-      btnBorrar.className = 'btn-accion btn-eliminar';
-      btnBorrar.onclick = async () => {
-        if (confirm('Â¿Seguro que deseas eliminar este cliente?') && idCliente) {
-          await fetch('/clientes-locales/' + idCliente, { method: 'DELETE' });
-          cargarClientes();
-        }
-      };
-
-      tarjeta.appendChild(btnEditar);
-      tarjeta.appendChild(btnBorrar);
+      // Borrar: el botón solo existe para el barbero
+      if (esBarbero()) {
+        tarjeta.appendChild(crearBoton('Borrar', 'btn-accion btn-eliminar', async () => {
+          if (confirm('¿Seguro que deseas eliminar este cliente?')) {
+            const res = await fetch('/clientes-locales/' + id, { method: 'DELETE', headers: cabeceras() });
+            if (avisarSiRechazo(res, 'No se pudo eliminar el cliente')) cargarClientes();
+          }
+        }));
+      }
       cont.appendChild(tarjeta);
     });
-
   } catch (error) {
     cont.textContent = 'No se pudieron cargar los clientes';
   }
@@ -905,58 +1277,39 @@ async function agregarCliente(e) {
   e.preventDefault();
   const nombre = document.getElementById('nombreCliente').value;
   const telefono = document.getElementById('telefonoCliente').value;
-
-  const res = await fetch('/clientes-locales', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ nombre, telefono })
-  });
-
-  if (res.ok) {
+  const res = await fetch('/clientes-locales', { method: 'POST', headers: cabeceras(), body: JSON.stringify({ nombre, telefono }) });
+  if (avisarSiRechazo(res, 'Error al guardar el cliente')) {
     document.getElementById('form-cliente').reset();
     cargarClientes();
-  } else {
-    alert('Error al guardar el cliente');
   }
 }
 
-// =========================================================================
-// SECCIÃ“N 2: SERVICIOS (Cal.com + SQLite local + ID Robusto + Botones Admin)
-// =========================================================================
+// ===== SERVICIOS: agregar, editar y borrar solo el barbero =====
 async function cargarServicios() {
   const cont = document.getElementById('servicios');
   const selectCita = document.getElementById('servicioCita');
-  
-  if (selectCita) {
-    selectCita.innerHTML = '<option value="">Seleccione un servicio...</option>';
-  }
+  if (selectCita) selectCita.innerHTML = '<option value="">Seleccione un servicio...</option>';
 
   try {
     const [serviciosCal, serviciosLocales] = await Promise.all([
       pedir('/servicios').catch(() => []),
       pedir('/servicios-locales').catch(() => [])
     ]);
-
-    const totalServicios = [...serviciosCal, ...serviciosLocales];
+    const total = [...serviciosCal, ...serviciosLocales];
     document.getElementById('fuente-servicios').textContent =
-      'Fuente: API Cal.com + Base de datos SQLite Â· ' + totalServicios.length + ' registros recibidos';
-    
+      'Fuente: API Cal.com + Base de datos SQLite · ' + total.length + ' registros recibidos';
     cont.textContent = '';
-    if (totalServicios.length === 0) { 
-      cont.textContent = 'TodavÃ­a no hay servicios creados'; 
-      return; 
-    }
+    if (total.length === 0) { cont.textContent = 'Todavía no hay servicios creados'; return; }
 
-    // 1. Pinta servicios de Cal.com
+    // Servicios de Cal.com (solo se ven)
     serviciosCal.filter((s) => !s.hidden).forEach((s) => {
       const nombre = s.title || s.name || 'Servicio';
       const minutos = s.lengthInMinutes || s.length;
       const lineas = [];
       if (s.description) lineas.push(s.description);
-      if (minutos) lineas.push('DuraciÃ³n: ' + minutos + ' minutos');
+      if (minutos) lineas.push('Duración: ' + minutos + ' minutos');
       const url = s.bookingUrl || ('https://cal.com/' + USUARIO_CAL + '/' + encodeURIComponent(s.slug));
-      cont.appendChild(crearTarjeta(nombre, lineas, null, { texto: 'Pedir cita', url: url }));
-
+      cont.appendChild(crearTarjeta(nombre, lineas, null, { texto: 'Pedir cita', url }));
       if (selectCita) {
         const option = document.createElement('option');
         option.value = nombre;
@@ -965,93 +1318,41 @@ async function cargarServicios() {
       }
     });
 
-    // 2. Pinta servicios locales
+    // Servicios de mi base de datos
     serviciosLocales.forEach((s) => {
-      const nombre = s.nombre || 'Servicio Local';
-      // Detecta cualquier propiedad posible para el ID en la BD
-      const idServicio = s.id || s.codigo || s.idServicio || s.servicioId;
-      
-      let precioTexto = '';
-      if (s.precio !== undefined && s.precio !== null) {
-        const precioFormateado = Number(s.precio).toLocaleString('es-CO');
-        precioTexto = 'Precio: $' + precioFormateado;
-      }
-      
+      const id = s.id;
       const lineas = [];
-      if (precioTexto) lineas.push(precioTexto);
+      if (s.precio !== undefined && s.precio !== null) lineas.push('Precio: $' + Number(s.precio).toLocaleString('es-CO'));
+      const tarjeta = crearTarjeta(s.nombre || 'Servicio Local', lineas, { texto: 'BD Local', clase: 'atendida' }, { texto: 'Pedir cita', url: 'https://cal.com/' + USUARIO_CAL });
 
-      const urlLocal = 'https://cal.com/' + USUARIO_CAL;
-      const tarjeta = crearTarjeta(
-        nombre, 
-        lineas, 
-        { texto: 'BD Local', clase: 'atendida' }, 
-        { texto: 'Pedir cita', url: urlLocal }
-      );
-
-      // BotÃ³n Editar servicio local
-      const btnEditar = document.createElement('button');
-      btnEditar.textContent = 'âœï¸ Editar';
-      btnEditar.className = 'btn-accion';
-      btnEditar.onclick = async () => {
-        const nuevoNombre = prompt('Nuevo nombre del servicio:', s.nombre);
-        const nuevoPrecioStr = prompt('Nuevo precio ($):', s.precio);
-        
-        if (nuevoNombre !== null && idServicio) {
-          let nuevoPrecio = Number(nuevoPrecioStr);
-          if (nuevoPrecio < 1000) nuevoPrecio = nuevoPrecio * 1000;
-
-          const respuestaPut = await fetch('/servicios-locales/' + idServicio, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-              nombre: nuevoNombre, 
-              precio: isNaN(nuevoPrecio) ? 0 : nuevoPrecio, 
-              activo: true 
-            })
-          });
-
-          if (respuestaPut.ok) {
-            cargarServicios();
-          } else {
-            alert('No se pudo actualizar el servicio');
+      // Editar y borrar: los botones solo existen para el barbero
+      if (esBarbero()) {
+        tarjeta.appendChild(crearBoton('Editar', 'btn-accion', async () => {
+          const nuevoNombre = prompt('Nuevo nombre del servicio:', s.nombre);
+          const nuevoPrecioStr = prompt('Nuevo precio ($):', s.precio);
+          if (nuevoNombre !== null && id) {
+            let nuevoPrecio = Number(nuevoPrecioStr);
+            if (nuevoPrecio < 1000) nuevoPrecio = nuevoPrecio * 1000;
+            const res = await fetch('/servicios-locales/' + id, { method: 'PUT', headers: cabeceras(), body: JSON.stringify({ nombre: nuevoNombre, precio: isNaN(nuevoPrecio) ? 0 : nuevoPrecio, activo: true }) });
+            if (avisarSiRechazo(res, 'No se pudo actualizar el servicio')) cargarServicios();
           }
-        } else {
-          alert('Error: No se encontrÃ³ el ID del servicio');
-        }
-      };
-
-      // BotÃ³n Borrar servicio local
-      const btnBorrar = document.createElement('button');
-      btnBorrar.textContent = 'ðŸ—‘ï¸ Borrar';
-      btnBorrar.className = 'btn-accion btn-eliminar';
-      btnBorrar.onclick = async () => {
-        if (confirm('Â¿Seguro que deseas eliminar este servicio local?') && idServicio) {
-          const resBorrar = await fetch('/servicios-locales/' + idServicio, { 
-            method: 'DELETE' 
-          });
-
-          if (resBorrar.ok) {
-            cargarServicios();
-          } else {
-            alert('No se pudo eliminar el servicio en el servidor');
+        }));
+        tarjeta.appendChild(crearBoton('Borrar', 'btn-accion btn-eliminar', async () => {
+          if (confirm('¿Seguro que deseas eliminar este servicio?')) {
+            const res = await fetch('/servicios-locales/' + id, { method: 'DELETE', headers: cabeceras() });
+            if (avisarSiRechazo(res, 'No se pudo eliminar el servicio')) cargarServicios();
           }
-        } else {
-          alert('Error: No se encontrÃ³ el ID del servicio');
-        }
-      };
-
-      tarjeta.appendChild(btnEditar);
-      tarjeta.appendChild(btnBorrar);
+        }));
+      }
       cont.appendChild(tarjeta);
 
       if (selectCita) {
         const option = document.createElement('option');
-        option.value = nombre;
-        option.textContent = nombre + (s.precio !== undefined ? ' ($' + Number(s.precio).toLocaleString('es-CO') + ')' : '');
+        option.value = s.nombre;
+        option.textContent = s.nombre + (s.precio !== undefined ? ' ($' + Number(s.precio).toLocaleString('es-CO') + ')' : '');
         selectCita.appendChild(option);
       }
     });
-
   } catch (error) {
     cont.textContent = 'No se pudieron cargar los servicios';
   }
@@ -1060,29 +1361,16 @@ async function cargarServicios() {
 async function agregarServicio(e) {
   e.preventDefault();
   const nombre = document.getElementById('nombreServicio').value;
-  let precioInput = parseFloat(document.getElementById('precioServicio').value);
-
-  if (precioInput < 1000) {
-    precioInput = precioInput * 1000;
-  }
-
-  const res = await fetch('/servicios-locales', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ nombre, precio: precioInput, activo: true })
-  });
-
-  if (res.ok) {
+  let precio = parseFloat(document.getElementById('precioServicio').value);
+  if (precio < 1000) precio = precio * 1000;
+  const res = await fetch('/servicios-locales', { method: 'POST', headers: cabeceras(), body: JSON.stringify({ nombre, precio, activo: true }) });
+  if (avisarSiRechazo(res, 'Error al guardar el servicio')) {
     document.getElementById('form-servicio').reset();
     cargarServicios();
-  } else {
-    alert('Error al guardar el servicio');
   }
 }
 
-// =========================================================================
-// SECCIÃ“N 3: CITAS (Cal.com + SQLite local + MenÃº desplegable + BotÃ³n Borrar)
-// =========================================================================
+// ===== CITAS: todos apartan; borrar solo el barbero =====
 async function cargarCitas() {
   const cont = document.getElementById('citas');
   try {
@@ -1090,55 +1378,40 @@ async function cargarCitas() {
       pedir('/citas').catch(() => []),
       pedir('/reservas').catch(() => [])
     ]);
-
-    const totalCitas = [...citasCal, ...citasLocales];
+    const total = [...citasCal, ...citasLocales];
     document.getElementById('fuente-citas').textContent =
-      'Fuente: API Cal.com + Base de datos SQLite Â· ' + totalCitas.length + ' registros recibidos';
-    
+      'Fuente: API Cal.com + Base de datos SQLite · ' + total.length + ' registros recibidos';
     cont.textContent = '';
-    if (totalCitas.length === 0) { 
-      cont.textContent = 'TodavÃ­a no hay citas apartadas'; 
-      return; 
-    }
+    if (total.length === 0) { cont.textContent = 'Todavía no hay citas apartadas'; return; }
 
     citasCal.forEach((c) => {
       const cliente = c.attendees && c.attendees[0] ? c.attendees[0].name : 'Cliente sin nombre';
       let etiqueta = { texto: 'Pendiente (Cal.com)', clase: 'pendiente' };
       if (c.status === 'accepted') etiqueta = { texto: 'Confirmada (Cal.com)', clase: 'atendida' };
       if (c.status === 'cancelled') etiqueta = { texto: 'Cancelada', clase: 'cancelada' };
-      
-      cont.appendChild(crearTarjeta(
-        c.title || 'Cita de Cal.com', 
-        ['Fecha: ' + formatearFecha(c.start), 'Cliente: ' + cliente], 
-        etiqueta
-      ));
+      cont.appendChild(crearTarjeta(c.title || 'Cita de Cal.com', ['Fecha: ' + formatearFecha(c.start), 'Cliente: ' + cliente], etiqueta));
     });
 
     citasLocales.forEach((c) => {
-      const servicio = c.servicio || 'Cita Local';
-      const idReserva = c.id || c.codigo || c.idReserva;
+      const id = c.id;
       const lineas = [
         'Cliente: ' + (c.clienteNombre || 'Sin nombre'),
-        'TelÃ©fono: ' + (c.telefono || 'Sin telÃ©fono'),
+        'Teléfono: ' + (c.telefono || 'Sin teléfono'),
         'Fecha: ' + formatearFecha(c.fechaHora)
       ];
-      
-      const tarjeta = crearTarjeta(servicio, lineas, { texto: 'Guardada en BD (Local)', clase: 'atendida' });
+      const tarjeta = crearTarjeta(c.servicio || 'Cita Local', lineas, { texto: 'Guardada en BD (Local)', clase: 'atendida' });
 
-      const btnBorrar = document.createElement('button');
-      btnBorrar.textContent = 'ðŸ—‘ï¸ Borrar';
-      btnBorrar.className = 'btn-accion btn-eliminar';
-      btnBorrar.onclick = async () => {
-        if (confirm('Â¿Seguro que deseas eliminar esta cita?') && idReserva) {
-          await fetch('/reservas/' + idReserva, { method: 'DELETE' });
-          cargarCitas();
-        }
-      };
-
-      tarjeta.appendChild(btnBorrar);
+      // Borrar: el botón solo existe para el barbero
+      if (esBarbero()) {
+        tarjeta.appendChild(crearBoton('Borrar', 'btn-accion btn-eliminar', async () => {
+          if (confirm('¿Seguro que deseas eliminar esta cita?')) {
+            const res = await fetch('/reservas/' + id, { method: 'DELETE', headers: cabeceras() });
+            if (avisarSiRechazo(res, 'No se pudo eliminar la cita')) cargarCitas();
+          }
+        }));
+      }
       cont.appendChild(tarjeta);
     });
-
   } catch (error) {
     cont.textContent = 'No se pudieron cargar las citas';
   }
@@ -1150,25 +1423,30 @@ async function agregarCita(e) {
   const telefono = document.getElementById('telCita').value;
   const servicio = document.getElementById('servicioCita').value;
   const fechaHora = document.getElementById('fechaCita').value;
-
-  const res = await fetch('/reservas', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ clienteNombre, telefono, servicio, fechaHora })
-  });
-
-  if (res.ok) {
+  const res = await fetch('/reservas', { method: 'POST', headers: cabeceras(), body: JSON.stringify({ clienteNombre, telefono, servicio, fechaHora }) });
+  if (avisarSiRechazo(res, 'Error al guardar la cita')) {
     document.getElementById('form-cita').reset();
     cargarCitas();
-  } else {
-    alert('Error al guardar la cita');
   }
 }
 
-// EjecuciÃ³n automÃ¡tica al cargar la pÃ¡gina
-cargarClientes();
-cargarServicios();
-cargarCitas();
+// ===== BORRAR TODO: solo el barbero =====
+async function borrarTodo() {
+  if (!confirm('¿Seguro que quieres borrar TODOS los datos de la base de datos? No se puede deshacer.')) return;
+  const res = await fetch('/datos', { method: 'DELETE', headers: cabeceras() });
+  if (avisarSiRechazo(res, 'No se pudieron borrar los datos')) cargarTodo();
+}
+
+// Carga las tres secciones
+function cargarTodo() {
+  cargarClientes();
+  cargarServicios();
+  cargarCitas();
+}
+
+// Al abrir la página: muestro el modo que corresponde y cargo todo
+mostrarModo();
+cargarTodo();
 
 ===== package.json =====
 {
@@ -1176,9 +1454,11 @@ cargarCitas();
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
-  "scripts": {
-    "test": "jest"
-  },
+ "scripts": {
+  "start": "node src/app.js",
+  "test": "jest"
+},
+
   "keywords": [],
   "author": "",
   "license": "ISC",
@@ -1190,61 +1470,137 @@ cargarCitas();
     "express": "^5.3.0",
     "reflect-metadata": "^0.2.2",
     "sqlite3": "^6.0.1",
-    "typeorm": "^1.1.2"
+    "typeorm": "^1.1.2",
+    "winston": "^3.19.0"
   },
   "devDependencies": {
-    "jest": "^30.5.2"
+    "jest": "^30.5.2",
+    "supertest": "^7.3.2"
+
+
+
+
+    
   }
+
 }
 
+
 ===== README.md =====
-# Barber Club - API REST & Base de Datos Local
+# Barber Club - API REST, Base de Datos, Observabilidad y Seguridad
 
-Proyecto de aplicaciÃ³n web para la gestiÃ³n administrativa de la barberÃ­a MVP Barber Club. El sistema combina el consumo de APIs externas para agendamiento con persistencia de datos local mediante **TypeORM** y **SQLite**, ofreciendo un flujo CRUD completo y arquitectura escalable.
+Proyecto de aplicación web para la gestión de la barbería MVP Barber Club. El sistema combina el consumo de APIs externas (Cal.com y JSONPlaceholder) con persistencia de datos local mediante **TypeORM** y **SQLite**, con un flujo CRUD completo. Incluye registro de logs, un endpoint de salud, medidas de seguridad y pruebas de integración.
 
 ---
 
-## ðŸ› ï¸ TecnologÃ­as e Infraestructura
+## Tecnologías e infraestructura
 - **Backend:** Node.js con Express.
-- **Base de Datos Local:** SQLite administrada a travÃ©s de **TypeORM** (generaciÃ³n de esquemas y tablas sin SQL manual).
-- **Frontend:** Interfaz web interactiva estructurada en HTML5/CSS3 y manipulaciÃ³n dinÃ¡mica del DOM con `fetch` API.
-- **Integraciones Externas:** Consumo de la API de Cal.com (servicios y citas) y JSONPlaceholder (clientes de prueba).
+- **Base de datos local:** SQLite administrada con **TypeORM**. Las tablas las crea el ORM a partir de las entidades (synchronize: true), sin SQL manual.
+- **Frontend:** interfaz web en HTML5, CSS3 y JavaScript, con la API fetch para hablar con el servidor.
+- **Integraciones externas:** API de Cal.com (servicios y citas) y JSONPlaceholder (clientes de prueba y envío de reservas).
+- **Logs:** winston.
+- **Pruebas:** Jest y Supertest.
 
 ---
 
-## ðŸš€ Endpoints e Interfaz de Aplicaciones (API REST)
+## Cómo ejecutarlo
+1. Instalar las librerías: `npm install`
+2. Crear un archivo `.env` en la raíz con estas dos variables:
+   ```
+   CAL_API_KEY=tu_clave_de_cal
+   CLAVE_BARBERO=la_clave_del_barbero
+   ```
+3. Encender el servidor: `npm start` (o `node src/app.js`)
+4. Abrir http://localhost:3000
 
-### 1. Servicios Externos (Reto 1)
-- `GET /servicios`: Consulta y retorna la lista de servicios agendables desde la API de Cal.com.
-- `GET /citas`: Obtiene la lista de citas programadas desde la plataforma Cal.com.
-- `GET /clientes`: Retorna datos sintÃ©ticos de prueba obtenidos desde JSONPlaceholder.
+Al arrancar, el servidor copia a la base de datos los datos de las APIs (sin repetir los que ya existen).
 
-### 2. Persistencia y CRUD Local (Reto 2)
-- **GestiÃ³n de Servicios Locales (`/servicios-locales`):**
-  - `GET /servicios-locales`: Consulta todos los servicios guardados localmente en SQLite.
-  - `POST /servicios-locales`: Crea un nuevo servicio local formateando el precio.
-  - `PUT /servicios-locales/:id`: Actualiza los datos de un servicio mediante su identificador Ãºnico.
-  - `DELETE /servicios-locales/:id`: Elimina un registro de servicio de la base de datos local.
+## Cómo ejecutar las pruebas
+`npm test`
 
-- **GestiÃ³n de Clientes y Reservas (`/clientes-locales`, `/reservas`):**
-  - `GET /reservas` / `POST /reservas`: Operaciones de consulta y agendamiento local.
-  - `PUT /reservas/:id` / `DELETE /reservas/:id`: ActualizaciÃ³n y cancelaciÃ³n de citas guardadas en SQLite.
+Las pruebas de integración usan una base de datos en memoria, así que no tocan `barberia.sqlite`.
 
 ---
 
-## ðŸ“Š Diagrama de Flujo del Sistema
+## Endpoints (API REST)
+
+### 1. Salud del servidor
+- `GET /health`: responde `{ "status": "ok", "timestamp": "..." }` para comprobar que el servidor está vivo.
+
+### 2. Servicios externos (Reto 1)
+- `GET /servicios`: lista de servicios agendables desde la API de Cal.com.
+- `GET /citas`: citas programadas desde Cal.com.
+- `GET /clientes`: clientes de prueba obtenidos desde JSONPlaceholder.
+
+### 3. Persistencia y CRUD local (Reto 2)
+- **CRUD de reservas (entidad Cita):**
+  - `POST /reservas`: valida los datos, guarda en SQLite y envía la reserva a una API externa. Responde 201 con la reserva y su id.
+  - `GET /reservas`: lista todas las reservas.
+  - `GET /reservas/:id`: busca una reserva por su id (404 si no existe).
+  - `PUT /reservas/:id`: modifica una reserva y la devuelve (404 si no existe). **Solo el barbero.**
+  - `DELETE /reservas/:id`: elimina una reserva y confirma (404 si no existe). **Solo el barbero.**
+- **Servicios locales (`/servicios-locales`):** GET es de todos; POST, PUT y DELETE son solo del barbero.
+- **Clientes locales (`/clientes-locales`):** GET, POST y PUT validan los datos de entrada; DELETE es solo del barbero.
+- `POST /sincronizar`: trae los datos de las APIs y los guarda en la base con el ORM. **Solo el barbero.**
+- `DELETE /datos`: borra los datos locales. **Solo el barbero.**
+- `POST /login-barbero`: comprueba la clave del barbero.
+
+Las acciones del barbero exigen el encabezado `x-clave-barbero` con la clave guardada en el `.env`.
+
+---
+
+## Envío a una API externa
+Al crear una reserva (`POST /reservas`), la aplicación la guarda en la base de datos con TypeORM y después la envía con POST a JSONPlaceholder (https://jsonplaceholder.typicode.com/posts). La respuesta incluye el estado del envío. Si la API externa falla, la reserva igual queda guardada.
+
+## Sincronización de la API a la base de datos
+El servicio `src/services/sincronizarService.js` trae los clientes (JSONPlaceholder), los servicios y las citas (Cal.com) y los guarda en la base de datos usando solo el ORM (`create` y `save`). Antes de guardar revisa si el registro ya existe, para no repetirlo. Se ejecuta al arrancar el servidor y también con `POST /sincronizar`.
+
+---
+
+## Observabilidad (Reto 3, parte 1)
+- **Logs:** el archivo `src/logger.js` configura winston. Un middleware registra cada petición con método, ruta, código HTTP y tiempo (por ejemplo `GET /health 200 4ms`).
+- **Errores:** se registran con nivel `[ERROR]` y el stacktrace completo, en la terminal y en el archivo `logs/app.log`.
+- **Endpoint `/health`:** descrito arriba.
+
+## Seguridad (Reto 3, parte 2)
+| Vulnerabilidad | Riesgo | Corrección |
+|---|---|---|
+| Sin validación de entrada | Se guardaban nombres vacíos, teléfonos inválidos y un `id` forzado | `limpiarCliente` y `validarCliente`: solo pasan `nombre` y `telefono`, con reglas de largo y formato. Responde 400 |
+| Endpoints sin autenticación | Cualquiera podía modificar reservas | `PUT /reservas/:id` exige la clave del barbero. Responde 401 |
+| Errores técnicos expuestos | El stacktrace mostraba rutas internas, y el encabezado `X-Powered-By` revelaba Express | Manejador de errores con mensajes genéricos (el detalle va al log) y `app.disable('x-powered-by')` |
+
+Además, las claves están en el archivo `.env`, que no se sube al repositorio.
+
+## Pruebas de integración (Reto 3, parte 3)
+En `tests/integracion.test.js`, con Jest y Supertest, sobre una base de datos en memoria:
+1. **Create:** `POST /reservas` responde 201 y el dato queda en la base.
+2. **Read:** se guarda una reserva y `GET /reservas/:id` devuelve exactamente ese dato.
+3. **Delete:** se crea y se borra una reserva, y el `GET` siguiente responde 404.
+
+En `tests/pruebas.test.js` están las pruebas del Reto 1, con servicios simulados (mocks).
+
+---
+
+## Inyección de dependencias
+Los controladores no crean sus servicios: los reciben desde afuera. Así, en las pruebas se les pasa un servicio simulado (mock) y se prueba sin internet ni base de datos.
+
+---
+
+## Diagrama de flujo del sistema
 
 ```mermaid
 flowchart TD
     subgraph Frontend [Cliente / Navegador]
         UI[Interfaz Web HTML/JS]
-        Form[Formulario de GestiÃ³n]
+        Form[Formulario de Gestión]
     end
 
     subgraph Backend [Servidor Express.js]
+        Log[Middleware de logs]
         API_Routes[Rutas API REST /app.js]
         Ctrl_Ext[Controlador APIs Externas]
         Ctrl_Res[Controlador Reservas]
+        Sync[Sincronización API a BD]
         ORM[TypeORM / AppDataSource]
     end
 
@@ -1257,16 +1613,20 @@ flowchart TD
         DB[(Base de Datos SQLite / barberia.sqlite)]
     end
 
+    %% Toda petición pasa primero por el registro de logs
+    UI --> Log
+    Log --> API_Routes
+
     %% Flujos de lectura (GET)
     UI -->|GET /servicios| API_Routes
     UI -->|GET /citas| API_Routes
     UI -->|GET /clientes| API_Routes
-    
+
     API_Routes --> Ctrl_Ext
     Ctrl_Ext -->|Consulta Cal.com| Cal
     Ctrl_Ext -->|Consulta JSONPlaceholder| JSONP
 
-    %% Flujos CRUD Local (POST / PUT / DELETE)
+    %% Flujos CRUD local (POST / PUT / DELETE)
     UI -->|GET/POST/PUT/DELETE /servicios-locales| API_Routes
     UI -->|GET/POST/PUT/DELETE /clientes-locales| API_Routes
     UI -->|POST /reservas| Form
@@ -1274,9 +1634,19 @@ flowchart TD
 
     API_Routes --> Ctrl_Res
     API_Routes --> ORM
-    
+
+    %% Sincronización de las APIs hacia la base de datos
+    API_Routes -->|POST /sincronizar| Sync
+    Sync -->|Trae servicios y citas| Cal
+    Sync -->|Trae clientes| JSONP
+    Sync --> ORM
+
     ORM -->|Guarda / Modifica / Elimina| DB
     DB -->|Retorna Datos SQLite| ORM
+
+    %% Envío a la API externa después de guardar la reserva
+    Ctrl_Res -->|Envía la reserva guardada POST /posts| JSONP
+```
 
 ===== .gitignore =====
 node_modules 

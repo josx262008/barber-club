@@ -1,0 +1,32 @@
+[
+  {
+    "Prueba": "GET /health",
+    "Personas": 50000,
+    "Peticiones/seg": 0,
+    "Latencia prom (ms)": 0,
+    "Latencia p99 (ms)": 0,
+    "Errores": 91694,
+    "No 2xx": 0,
+    "Estado": "COLAPSO"
+  },
+  {
+    "Prueba": "GET /reservas",
+    "Personas": 50000,
+    "Peticiones/seg": 0,
+    "Latencia prom (ms)": 0,
+    "Latencia p99 (ms)": 0,
+    "Errores": 33662,
+    "No 2xx": 0,
+    "Estado": "COLAPSO"
+  },
+  {
+    "Prueba": "POST /reservas",
+    "Personas": 50000,
+    "Peticiones/seg": 0,
+    "Latencia prom (ms)": 0,
+    "Latencia p99 (ms)": 0,
+    "Errores": 104430,
+    "No 2xx": 0,
+    "Estado": "COLAPSO"
+  }
+]

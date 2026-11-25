@@ -3,94 +3,225 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MVP Barber Club</title>
+  <title>Barbería El J · Estilo, corte y confianza</title>
+  <link rel="icon" href="logo.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Anton&family=Barlow:wght@400;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="estilos.css">
-  <style>
-    /* Estilos estéticos para los paneles de administración y formularios en la interfaz */
-    .panel-admin { background: #f4f4f4; padding: 15px; margin-bottom: 15px; border-radius: 8px; border: 1px solid #ddd; }
-    .panel-admin input, .panel-admin select { padding: 8px; margin-right: 5px; margin-bottom: 5px; width: 200px; }
-    .panel-admin button { padding: 8px 12px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
-    .panel-admin button:hover { background: #0056b3; }
-    .btn-refrescar { background: #28a745; margin-bottom: 10px; }
-    .btn-refrescar:hover { background: #218838; }
-    .btn-accion { background: #ffc107; border: none; padding: 4px 8px; margin-left: 5px; cursor: pointer; border-radius: 3px; font-size: 12px; }
-    .btn-eliminar { background: #dc3545; color: white; }
-  </style>
 </head>
 <body>
-  <!-- Encabezado principal de la aplicación web -->
-  <header>
-    <h1>MVP Barber Club</h1>
-    <p>Servicios, clientes y citas (Gestión Profesional)</p>
+  <div class="poste"></div>
+  <header class="barra">
+    <div class="barra-int">
+      <a href="javascript:void(0)" onclick="alternarBarbero()" title="Acceso del barbero">
+        <img src="logo.png" alt="Logo Barbería El J" class="logo-brillo">
+      </a>
+      <nav>
+        <a href="#sobre-mi">Sobre mí</a>
+        <a href="#servicios-sec">Servicios</a>
+        <a href="#pedir-cita-sec">Pedir cita</a>
+        <a href="#agenda-publica-sec">Horas ocupadas</a>
+      </nav>
+      <div class="barra-acciones">
+        <a class="btn btn-brillo" href="#pedir-cita-sec">Pedir cita</a>
+      </div>
+    </div>
   </header>
 
+  <audio id="audio-gta" src="gta-theme.aac" autoplay loop playsinline preload="auto"></audio>
+
+  <section class="portada" style="padding-top:0">
+    <div class="portada-int">
+      <div>
+        <h1 class="titulo-animado">
+          <span class="brillo-blanco">Estilo.</span>
+          <span class="rojo brillo-rojo">Corte.</span>
+          <span class="brillo-plata">Confianza.</span>
+        </h1>
+        <p class="subtitulo-glow">Cortes precisos y barba bien perfilada. Aparta tu cita en la barbería en menos de 2 minutos.</p>
+        <div class="acciones">
+          <a class="btn btn-brillo" href="#pedir-cita-sec">Pedir cita</a>
+          <a class="btn plata" href="#servicios-sec">Ver servicios</a>
+        </div>
+      </div>
+    </div>
+  </section>
+  <div class="poste"></div>
+
   <main>
-    <!-- SECCIÓN DE SERVICIOS: Solo el administrador define precios y servicios -->
-    <section>
-      <h2>Servicios</h2>
-      <p class="fuente"><span id="fuente-servicios">Fuente: GET /servicios</span></p>
-      
-      <!-- Panel con el botón de actualizar y el formulario exclusivo del administrador -->
-      <div class="panel-admin">
-        <button class="btn-refrescar" onclick="cargarServicios()">🔄 Actualizar Servicios</button>
-        <form id="form-servicio" style="display:inline-block; margin-left:10px;" onsubmit="agregarServicio(event)">
+    <section id="sobre-mi">
+      <div class="sobre">
+        <figure>
+          <img src="retrato.jpg" alt="El barbero en su silla, frente al letrero de Barbería El J">
+          <figcaption>Barbería El J</figcaption>
+        </figure>
+        <div>
+          <h2 class="titulo-seccion-brillo">Sobre mí</h2>
+          <p>Soy barbero por pasión y dedicación. Me especializo en ofrecer cortes modernos, estilos únicos y acabados de calidad, cuidando cada detalle para que cada cliente se sienta seguro y satisfecho con su imagen.</p>
+          <p>En <strong>Barbería El J</strong>, tu estilo es nuestra prioridad.</p>
+          <a class="btn btn-brillo" href="#pedir-cita-sec" style="margin-top:12px">Pedir cita</a>
+        </div>
+      </div>
+    </section>
+
+    <section id="servicios-sec">
+      <h2 class="titulo-seccion-brillo">Servicios</h2>
+      <div class="panel-admin solo-barbero">
+        <form id="form-servicio" onsubmit="agregarServicio(event)">
           <input type="text" id="nombreServicio" placeholder="Nombre del servicio" required />
           <input type="number" id="precioServicio" placeholder="Precio ($)" required />
-          <button type="submit">➕ Agregar Servicio (Admin)</button>
+          <button type="submit">Agregar servicio</button>
         </form>
       </div>
-
-      <!-- Contenedor donde se pintarán las tarjetas de servicios de forma dinámica -->
       <div id="servicios" class="lista">Cargando servicios...</div>
     </section>
 
-    <!-- SECCIÓN DE CLIENTES: Listado y gestión con control administrativo -->
-    <section>
-      <h2>Clientes</h2>
-      <p class="fuente"><span id="fuente-clientes">Fuente: GET /clientes</span></p>
-      
-      <!-- Panel para registrar clientes y actualizar la vista -->
-      <div class="panel-admin">
-        <button class="btn-refrescar" onclick="cargarClientes()">🔄 Actualizar Clientes</button>
-        <form id="form-cliente" style="display:inline-block; margin-left:10px;" onsubmit="agregarCliente(event)">
-          <input type="text" id="nombreCliente" placeholder="Nombre del cliente" required />
-          <input type="text" id="telefonoCliente" placeholder="Teléfono" required />
-          <button type="submit">➕ Registrar Cliente</button>
-        </form>
-      </div>
+    <section id="pedir-cita-sec">
+      <h2 class="titulo-seccion-brillo">Pedir cita</h2>
+      <p style="margin:0 0 12px 0; color:#d1d5db; font-size:0.92rem;">Atención de 9:00 a. m. a 8:00 p. m. · Duración máxima por corte: 40 min.</p>
+      <div class="panel-admin cita-card">
+        <form id="form-cita" class="form-cita-grid" onsubmit="agregarCita(event)">
+          <div class="campo-grupo">
+            <label for="clienteCita">Nombre completo</label>
+            <input type="text" id="clienteCita" placeholder="Ej. José Mestra" required />
+          </div>
 
-      <!-- Contenedor dinámico de clientes -->
-      <div id="clientes" class="lista">Cargando clientes...</div>
+          <div class="campo-grupo">
+            <label for="telCita">Teléfono / WhatsApp</label>
+            <input type="tel" id="telCita" placeholder="Ej. 31212271909" required />
+          </div>
+
+          <div class="campo-grupo">
+            <label for="servicioCita">Servicio</label>
+            <select id="servicioCita" required>
+              <option value="">Selecciona un servicio...</option>
+            </select>
+          </div>
+
+          <div class="campo-grupo">
+            <label for="fechaCitaDia">Fecha</label>
+            <input type="date" id="fechaCitaDia" onchange="alCambiarFechaCita()" onclick="this.showPicker && this.showPicker()" required />
+          </div>
+
+          <div class="campo-grupo">
+            <label for="horaCitaAmPm">Hora (9:00 a. m. – 8:00 p. m.)</label>
+            <select id="horaCitaAmPm" required>
+              <option value="">Selecciona fecha y hora...</option>
+            </select>
+          </div>
+
+          <div class="campo-grupo campo-boton">
+            <button type="submit" class="btn-pedir-cita btn-brillo">Pedir cita</button>
+          </div>
+        </form>
+
+        <!-- Solo se muestra al cliente que acaba de pedir una cita activa -->
+        <div id="ultima-cita-cliente" style="margin-top:16px"></div>
+      </div>
     </section>
 
-    <!-- SECCIÓN DE CITAS: Permite apartar citas eligiendo el servicio de un menú desplegable -->
-    <section>
-      <h2>Citas</h2>
-      <p class="fuente"><span id="fuente-citas">Fuente: GET /citas</span></p>
-      
-      <!-- Panel de agendamiento de citas -->
-      <div class="panel-admin">
-        <button class="btn-refrescar" onclick="cargarCitas()">🔄 Actualizar Citas</button>
-        <form id="form-cita" style="display:inline-block; margin-left:10px;" onsubmit="agregarCita(event)">
-          <input type="text" id="clienteCita" placeholder="Nombre Cliente" required />
-          <input type="text" id="telCita" placeholder="Teléfono" required />
-          
-          <!-- Menú desplegable (<select>) que se llena automáticamente con los servicios disponibles -->
-          <select id="servicioCita" required>
-            <option value="">Seleccione un servicio...</option>
-          </select>
+    <!-- TABLA PÚBLICA DE CITAS / HORAS OCUPADAS PARA CLIENTES -->
+    <section id="agenda-publica-sec">
+      <h2 class="titulo-seccion-brillo">Citas y horas ocupadas</h2>
+      <p style="margin:0 0 14px 0; color:#d1d5db; font-size:0.92rem;">
+        Revisa qué turnos ya están tomados (cada corte ocupa hasta 40 minutos). Si eliges una fecha en el calendario, te mostramos las horas ocupadas de ese día.
+      </p>
+      <div class="panel-admin tabla-citas-wrap">
+        <table class="tabla-citas">
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Hora (a. m. / p. m.)</th>
+              <th>Duración</th>
+              <th>Estado</th>
+            </tr>
+          </thead>
+          <tbody id="cuerpo-tabla-ocupadas">
+            <tr>
+              <td colspan="4">Cargando horarios...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
 
-          <input type="datetime-local" id="fechaCita" required />
-          <button type="submit">➕ Apartar Cita</button>
+    <!-- PANEL PRIVADO DEL BARBERO (visible solo al entrar desde el logo con clave) -->
+    <section id="panel-privado-barbero" class="solo-barbero">
+      <h2 class="titulo-seccion-brillo">Panel del barbero</h2>
+      <div class="panel-admin" style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+        <button type="button" onclick="cambiarVistaBarbero('pedidas')">Citas pedidas</button>
+        <button type="button" class="btn-accion" style="margin-top:0" onclick="cambiarVistaBarbero('canceladas')">Citas canceladas</button>
+        <button type="button" class="btn-accion" style="margin-top:0" onclick="cambiarVistaBarbero('clientes')">Clientes</button>
+        <button type="button" class="btn-accion" style="margin-top:0" onclick="cambiarVistaBarbero('auditoria')">Auditoría</button>
+        <button type="button" class="btn-accion" style="margin-top:0" onclick="salirPanelBarbero()">Salir del panel</button>
+        <button type="button" class="btn-peligro" style="margin-left:auto" onclick="borrarTodo()">Borrar todos los datos</button>
+      </div>
+
+      <!-- Agendar cita manual por WhatsApp o en persona -->
+      <div class="panel-admin cita-card" style="margin-top:16px">
+        <h3 style="margin-top:0">Agendar cita manual (WhatsApp / en persona)</h3>
+        <form id="form-cita-manual" class="form-cita-grid" onsubmit="agregarCitaManual(event)">
+          <div class="campo-grupo">
+            <label for="clienteManual">Nombre del cliente</label>
+            <input type="text" id="clienteManual" placeholder="Nombre del cliente" required />
+          </div>
+
+          <div class="campo-grupo">
+            <label for="telManual">Teléfono</label>
+            <input type="tel" id="telManual" placeholder="Teléfono" required />
+          </div>
+
+          <div class="campo-grupo">
+            <label for="servicioManual">Servicio</label>
+            <select id="servicioManual" required>
+              <option value="">Selecciona un servicio...</option>
+            </select>
+          </div>
+
+          <div class="campo-grupo">
+            <label for="fechaManualDia">Fecha</label>
+            <input type="date" id="fechaManualDia" onchange="actualizarHorasManuales()" onclick="this.showPicker && this.showPicker()" required />
+          </div>
+
+          <div class="campo-grupo">
+            <label for="horaManualAmPm">Hora (9:00 a. m. – 8:00 p. m.)</label>
+            <select id="horaManualAmPm" required>
+              <option value="">Selecciona fecha y hora...</option>
+            </select>
+          </div>
+
+          <div class="campo-grupo campo-boton">
+            <button type="submit" class="btn-pedir-cita">Guardar cita</button>
+          </div>
         </form>
       </div>
 
-      <!-- Contenedor dinámico de citas -->
-      <div id="citas" class="lista">Cargando citas...</div>
+      <div id="vista-citas-pedidas">
+        <h3>Citas pedidas</h3>
+        <div id="citas-pedidas" class="lista"></div>
+      </div>
+
+      <div id="vista-citas-canceladas" style="display:none">
+        <h3>Citas canceladas</h3>
+        <div id="citas-canceladas" class="lista"></div>
+      </div>
+
+      <div id="vista-clientes" style="display:none">
+        <h3>Clientes registrados</h3>
+        <div id="clientes" class="lista"></div>
+      </div>
+
+      <div id="vista-auditoria" style="display:none">
+        <h3>Auditoría (movimientos en base de datos)</h3>
+        <div id="auditoria" class="lista"></div>
+      </div>
     </section>
   </main>
 
-  <!-- Script principal de JavaScript que controla la lógica y la interacción -->
+  <div class="poste"></div>
+  <footer><strong>Barbería El J</strong> · Estilo, corte y confianza</footer>
+
   <script src="script.js"></script>
 </body>
 </html>

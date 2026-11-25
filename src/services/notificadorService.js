@@ -6,6 +6,11 @@ const URL_BASE = 'https://jsonplaceholder.typicode.com';
 
 // Envía los datos de la reserva a la API externa y devuelve su respuesta
 async function notificar(reserva) {
+
+
+    // En la prueba de carga no llamo a la API externa (SIN_EXTERNAS=true)
+  if (process.env.SIN_EXTERNAS === 'true') return { id: 0 };
+  
   const respuesta = await axios.post(`${URL_BASE}/posts`, {
     title: 'Nueva reserva #' + reserva.id,
     body: reserva.clienteNombre + ' - ' + reserva.servicio + ' - ' + reserva.fechaHora,
