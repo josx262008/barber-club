@@ -7,26 +7,31 @@ const Cliente = require('../entities/Cliente');
 const Servicio = require('../entities/Servicio');
 const Cita = require('../entities/Cita');
 
-// Creo la conexión con su configuración
-const AppDataSource = new DataSource({
-  // Tipo de base de datos que uso: SQLite
+// Si existe DATABASE_URL y no estamos en modo test, usamos PostgreSQL (Neon en Render)
+const usarPostgres = Boolean(process.env.DATABASE_URL) && process.env.NODE_ENV !== 'test';
 
-  type: 'better-sqlite3',
-  // En las pruebas uso una base en memoria (se borra sola); si no, el archivo de siempre
-
-
-  database: process.env.NODE_ENV === 'test' ? ':memory:' : 'barberia.sqlite',
-  // Si arranco con LOG_SILENT=true (prueba de carga), el logger no escribe nada
-
-
-  silent: process.env.LOG_SILENT === 'true',
-  // synchronize: true hace que el ORM cree las tablas solo, sin CREATE TABLE
-  synchronize: true,
-  // Lista de tablas que el ORM debe crear
-
-  
-  entities: [Cliente, Servicio, Cita]
-});
+// Creo la conexión según el entorno
+const AppDataSource = usarPostgres
+  ? new DataSource({
+      type: 'postgres',
+      url: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false },
+      silent: process.env.LOG_SILENT === 'true',
+      synchronize: true,
+      entities: [Cliente, Servicio, Cita]
+    })
+  : new DataSource({
+      // Tipo de base de datos en local o pruebas: SQLite
+      type: 'better-sqlite3',
+      // En las pruebas uso una base en memoria (se borra sola); si no, el archivo de siempre
+      database: process.env.NODE_ENV === 'test' ? ':memory:' : 'barberia.sqlite',
+      // Si arranco con LOG_SILENT=true (prueba de carga), el logger no escribe nada
+      silent: process.env.LOG_SILENT === 'true',
+      // synchronize: true hace que el ORM cree las tablas solo, sin CREATE TABLE
+      synchronize: true,
+      // Lista de tablas que el ORM debe crear
+      entities: [Cliente, Servicio, Cita]
+    });
 
 // Exporto la conexión para usarla en otros archivos
 module.exports = AppDataSource;

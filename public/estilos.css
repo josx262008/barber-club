@@ -30,6 +30,7 @@ body {
   color: var(--plata);
   font-size: 1.05rem;
   line-height: 1.5;
+  overflow-x: hidden;
 }
 
 /* Foto de la barbería completa detrás de toda la página, oscurecida para que se lea */
@@ -70,11 +71,41 @@ select:focus-visible {
   to { background-position: 79px 0; }
 }
 
+/* Brillo y brinco suave sin cambiar colores a lo loco */
+@keyframes brilloYBrincoSuave {
+  0%, 100% {
+    transform: translateY(0);
+    text-shadow: 0 0 8px rgba(255, 255, 255, 0.25), 0 0 16px rgba(255, 59, 67, 0.22);
+  }
+  50% {
+    transform: translateY(-4px);
+    text-shadow: 0 0 14px rgba(255, 255, 255, 0.55), 0 0 24px rgba(255, 59, 67, 0.65);
+  }
+}
+
+.letras-vivas,
+.barra nav a,
+.btn,
+.boton-reservar,
+main h2,
+main h3 {
+  animation: brilloYBrincoSuave 2.6s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .poste,
   .titulo-animado,
   .brillo-plata,
-  .btn-musica.musica-encendida {
+  .btn-musica.musica-encendida,
+  .letras-vivas,
+  .barra nav a,
+  .btn,
+  .boton-reservar,
+  main h2,
+  main h3,
+  .mascota-contenedor,
+  .mascota-muneco,
+  .mascota-globo {
     animation: none;
   }
 }
@@ -83,7 +114,7 @@ select:focus-visible {
 .barra {
   position: sticky;
   top: 0;
-  z-index: 10;
+  z-index: 20;
   background: rgba(0, 0, 0, .88);
   backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--linea);
@@ -630,6 +661,83 @@ body.modo-barbero #agenda-publica-sec {
   display: none;
 }
 
+/* Muñeco grande caminando por toda la página sin voltear el texto */
+.mascota-contenedor {
+  position: fixed;
+  bottom: 14px;
+  left: 0;
+  z-index: 35;
+  animation: caminarIdaYVuelta 20s linear infinite;
+}
+
+.mascota-contenedor:hover {
+  animation-play-state: paused;
+}
+
+.mascota-agendar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-decoration: none;
+}
+
+.mascota-globo {
+  background: linear-gradient(135deg, var(--rojo-claro), var(--rojo));
+  color: #ffffff;
+  font-family: var(--titulos);
+  font-size: 1rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 7px 14px;
+  border-radius: 10px;
+  border: 2px solid #ffffff;
+  box-shadow: 0 0 18px rgba(255, 59, 67, 0.9), 0 6px 14px rgba(0, 0, 0, 0.75);
+  margin-bottom: 6px;
+  text-align: center;
+  white-space: nowrap;
+  animation: globoBrinco 1.2s ease-in-out infinite;
+}
+
+.mascota-muneco {
+  width: 195px;
+  height: auto;
+  display: block;
+  border-radius: 26px;
+  mix-blend-mode: lighten;
+  filter: contrast(1.08) drop-shadow(0 0 18px rgba(255, 59, 67, 0.75)) drop-shadow(0 10px 16px rgba(0, 0, 0, 0.9));
+  animation: caminarPaso 0.55s ease-in-out infinite;
+}
+
+@keyframes caminarIdaYVuelta {
+  0% {
+    transform: translateX(-210px);
+  }
+  50% {
+    transform: translateX(calc(100vw - 215px));
+  }
+  100% {
+    transform: translateX(-210px);
+  }
+}
+
+@keyframes caminarPaso {
+  0%, 100% {
+    transform: translateY(0) rotate(-2.5deg);
+  }
+  50% {
+    transform: translateY(-11px) rotate(2.5deg);
+  }
+}
+
+@keyframes globoBrinco {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
 footer {
   text-align: center;
   color: var(--gris);
@@ -661,5 +769,12 @@ footer strong {
   }
   .barra-acciones {
     margin-left: auto;
+  }
+  .mascota-muneco {
+    width: 145px;
+  }
+  .mascota-globo {
+    font-size: 0.8rem;
+    padding: 5px 9px;
   }
 }

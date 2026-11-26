@@ -6,7 +6,7 @@ const reservaService = require('./services/reservaService');
 const notificadorService = require('./services/notificadorService');
 // Importo el servicio que copia los datos de las APIs a la base de datos
 const sincronizarService = require('./services/sincronizarService');
-// Servicio de auditoría para registrar eventos en SQLite
+// Servicio de auditoría para registrar eventos en SQLite o PostgreSQL
 const { registrarAuditoria } = require('./services/auditoriaService');
 // Fábricas de controladores
 const crearControlador = require('./controllers/controlador');
@@ -105,6 +105,55 @@ function extraerDiaYMinutos(fechaHoraStr) {
 
 function hayChoqueHorario(inicioNuevo, finNuevo, inicioExistente, finExistente) {
   return inicioNuevo < finExistente && finNuevo > inicioExistente;
+}
+
+function construirEnlaceGoogleCalendar(reserva, tituloPrefijo) {
+  const match = String(reserva.fechaHora || '').match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+  if (!match) return '';
+  const [, anio, mes, dia, hh, mm] = match;
+  const inicioUtc = new Date(`${anio}-${mes}-${dia}T${hh}:${mm}:00-05:00`);
+  if (isNaN(inicioUtc.getTime())) return '';
+  const finUtc = new Date(inicioUtc.getTime() + DURACION_CITA_MIN * 60 * 1000);
+
+  const fmt = (d) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+  const titulo = `${tituloPrefijo}: ${reserva.clienteNombre} - ${reserva.servicio}`;
+  const detalle = `Cliente: ${reserva.clienteNombre}\nTelefono: ${reserva.telefono || 'No indicado'}\nServicio: ${reserva.servicio}\nEstado: ${reserva.estado || 'pendiente'}`;
+
+  return (
+    'https://calendar.google.com/calendar/render?action=TEMPLATE' +
+    `&text=${encodeURIComponent(titulo)}` +
+    `&dates=${fmt(inicioUtc)}/${fmt(finUtc)}` +
+    `&details=${encodeURIComponent(detalle)}`
+  );
+}
+
+async function enviarAvisoBarbero(asunto, textoHtml, reserva) {
+  const para = process.env.CORREO_BARBERO;
+  const enlaceCal = construirEnlaceGoogleCalendar(reserva, 'Cita Barberia El-J');
+  const cuerpoFinal = `${textoHtml}${enlaceCal ? `<p><a href="${enlaceCal}">Agregar / ver en Google Calendar</a></p>` : ''}`;
+
+  if (process.env.RESEND_API_KEY && para) {
+    const resp = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        from: process.env.CORREO_REMITE || 'Barberia El-J <onboarding@resend.dev>',
+        to: [para],
+        subject: asunto,
+        html: cuerpoFinal
+      })
+    });
+    if (!resp.ok) {
+      const errTxt = await resp.text();
+      throw new Error(`Resend error ${resp.status}: ${errTxt}`);
+    }
+    return { enviado: true, enlaceCal };
+  }
+
+  return { enviado: false, enlaceCal };
 }
 
 // Endpoint público solo para consultar qué horas ya están ocupadas en un día (sin datos personales)
@@ -211,6 +260,18 @@ app.post('/reservas', async (req, res, next) => {
       accion: 'PIDIO',
     });
 
+    let enlaceCalendar = '';
+    try {
+      const aviso = await enviarAvisoBarbero(
+        `Nueva cita pedida: ${reserva.clienteNombre}`,
+        `<p><b>Cliente:</b> ${reserva.clienteNombre}<br><b>Telefono:</b> ${reserva.telefono || 'No indicado'}<br><b>Servicio:</b> ${reserva.servicio}<br><b>Fecha y hora:</b> ${reserva.fechaHora}</p>`,
+        reserva
+      );
+      enlaceCalendar = aviso.enlaceCal || '';
+    } catch (e) {
+      logger.fallo('No se pudo enviar correo de nueva cita:', e.message);
+    }
+
     let notificacion = 'no enviada';
     try {
       const externo = await notificadorService.notificar(reserva);
@@ -219,7 +280,7 @@ app.post('/reservas', async (req, res, next) => {
       logger.fallo('No se pudo notificar a la API externa:', e.message);
     }
 
-    return res.status(201).json({ ...reserva, notificacion });
+    return res.status(201).json({ ...reserva, notificacion, enlaceCalendar });
   } catch (error) {
     next(error);
   }
@@ -243,6 +304,13 @@ app.post('/reservas/:id/cancelar', async (req, res) => {
       servicio: actualizada.servicio || null,
       accion: 'CANCELO',
     });
+
+    await enviarAvisoBarbero(
+      `Cita cancelada: ${actualizada.clienteNombre}`,
+      `<p>Se cancelo la cita de <b>${actualizada.clienteNombre}</b> (${actualizada.servicio}) programada para <b>${actualizada.fechaHora}</b>.</p>`,
+      actualizada
+    ).catch((e) => logger.fallo('No se pudo enviar correo de cancelacion:', e.message));
+
     res.json({ mensaje: 'Cita cancelada', reserva: actualizada });
   } catch (error) {
     logger.fallo('Error al cancelar reserva:', error);
@@ -269,6 +337,50 @@ app.put('/reservas/:id', soloBarbero, async (req, res, next) => {
 });
 
 app.delete('/reservas/:id', soloBarbero, reservas.eliminar);
+
+app.post('/recordatorios/ejecutar', async (req, res) => {
+  try {
+    const claveCron = req.get('x-clave-cron');
+    if (!process.env.CLAVE_CRON || claveCron !== process.env.CLAVE_CRON) {
+      return res.status(401).json({ error: 'No autorizado' });
+    }
+
+    const ahoraBogota = new Intl.DateTimeFormat('sv-SE', {
+      timeZone: 'America/Bogota',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    }).format(new Date()).replace(' ', 'T');
+
+    const todas = await reservaService.listar();
+    let avisadas = 0;
+
+    for (const cita of todas) {
+      const estado = cita.estado || 'pendiente';
+      if (estado === 'cancelada' || estado === 'atendida') continue;
+      if (cita.recordatorioEnviado) continue;
+
+      const horaCita = String(cita.fechaHora || '').slice(0, 16);
+      if (horaCita && horaCita <= ahoraBogota) {
+        await enviarAvisoBarbero(
+          `Hora de atender cita: ${cita.clienteNombre}`,
+          `<p>Llego la hora de atender a <b>${cita.clienteNombre}</b> (${cita.servicio}) a las <b>${cita.fechaHora}</b>.</p>`,
+          cita
+        );
+        await reservaService.actualizar(cita.id, { recordatorioEnviado: true });
+        avisadas += 1;
+      }
+    }
+
+    res.json({ ok: true, avisadas });
+  } catch (error) {
+    logger.fallo('Error al ejecutar recordatorios:', error);
+    res.status(500).json({ error: 'No se pudieron procesar los recordatorios' });
+  }
+});
 
 // --- AUDITORÍA (solo el barbero) ---
 app.get('/auditoria', soloBarbero, async (req, res) => {
@@ -451,18 +563,33 @@ process.on('unhandledRejection', (reason) => {
 if (require.main === module) {
   AppDataSource.initialize()
     .then(async () => {
-      await AppDataSource.query(`
-        CREATE TABLE IF NOT EXISTS auditoria (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          nombre TEXT,
-          usuario TEXT,
-          servicio TEXT,
-          hora TEXT NOT NULL,
-          rol TEXT NOT NULL DEFAULT 'cliente'
-        )
-      `);
+      const esPostgres = Boolean(process.env.DATABASE_URL) && process.env.NODE_ENV !== 'test';
+      const sqlAuditoria = esPostgres
+        ? `
+          CREATE TABLE IF NOT EXISTS auditoria (
+            id SERIAL PRIMARY KEY,
+            nombre TEXT,
+            usuario TEXT,
+            servicio TEXT,
+            hora TEXT NOT NULL,
+            rol TEXT NOT NULL DEFAULT 'cliente'
+          )
+        `
+        : `
+          CREATE TABLE IF NOT EXISTS auditoria (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT,
+            usuario TEXT,
+            servicio TEXT,
+            hora TEXT NOT NULL,
+            rol TEXT NOT NULL DEFAULT 'cliente'
+          )
+        `;
 
- app.listen(3000, () => console.log('Barbería El J · Servidor activo en http://localhost:3000'));     
+      await AppDataSource.query(sqlAuditoria);
+
+      const puerto = process.env.PORT || 3000;
+      app.listen(puerto, () => console.log(`Barbería El J · Servidor activo en http://localhost:${puerto}`));
     })
     .catch((error) => logger.fallo('No se pudo conectar a la base de datos:', error));
 }

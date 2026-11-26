@@ -223,7 +223,7 @@ async function poblarSelectHorasConDia(selectHora, dia) {
     }
   }
 
-  for (let min = HORA_INICIO_MIN; min + DURACION_CITA_MIN <= HORA_FIN_MIN; min += PASO_MIN) {
+  for (let min = HORA_INICIO_MIN; min <= HORA_FIN_MIN; min += PASO_MIN) {
     const finSlot = min + DURACION_CITA_MIN;
     const bloqueada = ocupadas.some((c) => {
       const inicioEx = Number(c.minutos);
@@ -240,7 +240,6 @@ async function poblarSelectHorasConDia(selectHora, dia) {
     selectHora.appendChild(opt);
   }
 }
-
 async function actualizarHorasDisponibles() {
   const selectHora = document.getElementById('horaCitaAmPm');
   const dia = document.getElementById('fechaCitaDia')?.value || '';
