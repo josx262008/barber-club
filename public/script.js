@@ -2,6 +2,10 @@ let claveBarbero = sessionStorage.getItem('claveBarbero') || '';
 let vistaBarberoActiva = 'pedidas';
 const STORAGE_ULTIMA_CITA = 'ultimaCitaBarberiaElJ';
 const DURACION_CITA_MIN = 40;
+const DURACION_CORTE_MIN = 40;
+const DURACION_BARBA_MIN = 20;
+const DURACION_CEJAS_MIN = 15; // Cambia a 20 si prefieres 20 min para cejas
+const MINUTOS_ANTICIPACION_CANCELAR = 60;
 const HORA_INICIO_MIN = 9 * 60;  // 09:00 a. m.
 const HORA_FIN_MIN = 20 * 60;    // 08:00 p. m.
 const PASO_MIN = 30;
@@ -209,7 +213,45 @@ function hayChoqueHorario(inicioNuevo, finNuevo, inicioExistente, finExistente) 
   return inicioNuevo < finExistente && finNuevo > inicioExistente;
 }
 
-async function poblarSelectHorasConDia(selectHora, dia) {
+function obtenerDuracionPorServicio(nombreServicio, duracionBackend) {
+  const durNum = Number(duracionBackend);
+  if (!isNaN(durNum) && durNum > 0) return durNum;
+
+  const texto = String(nombreServicio || '').toLowerCase();
+  if (texto.includes('ceja')) return DURACION_CEJAS_MIN;
+  if (texto.includes('barba')) return DURACION_BARBA_MIN;
+  if (texto.includes('corte')) return DURACION_CORTE_MIN;
+  return DURACION_CITA_MIN;
+}
+
+function minutosActualesBogota() {
+  const ahora = new Date();
+  const partes = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Bogota',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).formatToParts(ahora);
+
+  const map = {};
+  partes.forEach((p) => { map[p.type] = p.value; });
+  return {
+    diaHoy: `${map.year}-${map.month}-${map.day}`,
+    minutosHoy: Number(map.hour) * 60 + Number(map.minute)
+  };
+}
+
+function puedeCancelarPorTiempo(fechaHoraStr) {
+  const fechaCita = new Date(fechaHoraStr);
+  if (isNaN(fechaCita)) return false;
+  const diffMin = (fechaCita.getTime() - Date.now()) / (1000 * 60);
+  return diffMin >= MINUTOS_ANTICIPACION_CANCELAR;
+}
+
+async function poblarSelectHorasConDia(selectHora, dia, nombreServicioSeleccionado = '') {
   if (!selectHora) return;
   selectHora.innerHTML = '<option value="">Selecciona hora...</option>';
 
@@ -223,11 +265,19 @@ async function poblarSelectHorasConDia(selectHora, dia) {
     }
   }
 
+  const { diaHoy, minutosHoy } = minutosActualesBogota();
+  const esHoy = dia === diaHoy;
+  const esDiaPasado = Boolean(dia) && dia < diaHoy;
+  const duracionNuevo = obtenerDuracionPorServicio(nombreServicioSeleccionado);
+
   for (let min = HORA_INICIO_MIN; min <= HORA_FIN_MIN; min += PASO_MIN) {
-    const finSlot = min + DURACION_CITA_MIN;
+    if (esDiaPasado || (esHoy && min <= minutosHoy)) continue;
+
+    const finSlot = min + duracionNuevo;
     const bloqueada = ocupadas.some((c) => {
       const inicioEx = Number(c.minutos);
-      const finEx = inicioEx + Number(c.duracionMin || DURACION_CITA_MIN);
+      const durEx = obtenerDuracionPorServicio(c.servicio, c.duracionMin);
+      const finEx = inicioEx + durEx;
       return hayChoqueHorario(min, finSlot, inicioEx, finEx);
     });
 
@@ -240,16 +290,19 @@ async function poblarSelectHorasConDia(selectHora, dia) {
     selectHora.appendChild(opt);
   }
 }
+
 async function actualizarHorasDisponibles() {
   const selectHora = document.getElementById('horaCitaAmPm');
   const dia = document.getElementById('fechaCitaDia')?.value || '';
-  await poblarSelectHorasConDia(selectHora, dia);
+  const servicioSel = document.getElementById('servicioCita')?.value || '';
+  await poblarSelectHorasConDia(selectHora, dia, servicioSel);
 }
 
 async function actualizarHorasManuales() {
   const selectHora = document.getElementById('horaManualAmPm');
   const dia = document.getElementById('fechaManualDia')?.value || '';
-  await poblarSelectHorasConDia(selectHora, dia);
+  const servicioSel = document.getElementById('servicioManual')?.value || '';
+  await poblarSelectHorasConDia(selectHora, dia, servicioSel);
 }
 
 async function cargarTablaHorasOcupadas() {
@@ -262,7 +315,6 @@ async function cargarTablaHorasOcupadas() {
   try {
     const data = await pedir(`/horarios-ocupados${query}`);
     const ocupadas = Array.isArray(data.ocupadas) ? data.ocupadas : [];
-    const duracion = Number(data.duracionMin || DURACION_CITA_MIN);
 
     tbody.innerHTML = '';
     if (ocupadas.length === 0) {
@@ -283,9 +335,11 @@ async function cargarTablaHorasOcupadas() {
       const tdFecha = document.createElement('td');
       tdFecha.textContent = formatearSoloFecha(item.dia);
 
-      const tdHora = document.createElement('td');
+      const duracion = obtenerDuracionPorServicio(item.servicio, item.duracionMin);
       const inicioMin = Number(item.minutos);
       const finMin = inicioMin + duracion;
+
+      const tdHora = document.createElement('td');
       tdHora.textContent = `${formatearHoraAmPm(inicioMin)} – ${formatearHoraAmPm(finMin)}`;
 
       const tdDur = document.createElement('td');
@@ -386,6 +440,9 @@ async function cargarServicios() {
         selectManual.appendChild(optionM);
       }
     });
+
+    if (selectCita) selectCita.onchange = () => actualizarHorasDisponibles();
+    if (selectManual) selectManual.onchange = () => actualizarHorasManuales();
   } catch (error) {
     cont.textContent = 'No se pudieron cargar los servicios';
   }
@@ -437,21 +494,41 @@ function renderizarUltimaCitaCliente() {
     { texto: 'Cita solicitada', clase: 'atendida' }
   );
 
-  tarjeta.appendChild(crearBoton('Cancelar cita', 'btn-accion btn-eliminar', async () => {
-    if (!confirm('¿Seguro que deseas cancelar esta cita?')) return;
-    const res = await fetch('/reservas/' + cita.id + '/cancelar', { method: 'POST' });
-    if (!res.ok) {
-      alert('No se pudo cancelar la cita');
-      return;
-    }
-    sessionStorage.removeItem(STORAGE_ULTIMA_CITA);
-    alert('Cita cancelada.');
-    renderizarUltimaCitaCliente();
-    actualizarHorasDisponibles();
-    actualizarHorasManuales();
-    cargarTablaHorasOcupadas();
-    if (esBarbero()) cargarDatosBarbero();
-  }));
+  if (puedeCancelarPorTiempo(cita.fechaHora)) {
+    tarjeta.appendChild(crearBoton('Cancelar cita', 'btn-accion btn-eliminar', async () => {
+      if (!puedeCancelarPorTiempo(cita.fechaHora)) {
+        alert('Solo puedes cancelar hasta 1 hora antes del servicio.');
+        renderizarUltimaCitaCliente();
+        return;
+      }
+      if (!confirm('¿Seguro que deseas cancelar esta cita?')) return;
+      const res = await fetch('/reservas/' + cita.id + '/cancelar', {
+        method: 'POST',
+        headers: cabeceras(),
+        body: JSON.stringify({
+          telefono: cita.telefono,
+          clienteNombre: cita.clienteNombre
+        })
+      });
+      if (!res.ok) {
+        let msg = 'No se pudo cancelar la cita';
+        try {
+          const dataErr = await res.json();
+          if (dataErr?.error) msg = dataErr.error;
+        } catch {}
+        alert(msg);
+        renderizarUltimaCitaCliente();
+        return;
+      }
+      sessionStorage.removeItem(STORAGE_ULTIMA_CITA);
+      alert('Cita cancelada. El horario quedó disponible según la hora actual.');
+      renderizarUltimaCitaCliente();
+      actualizarHorasDisponibles();
+      actualizarHorasManuales();
+      cargarTablaHorasOcupadas();
+      if (esBarbero()) cargarDatosBarbero();
+    }));
+  }
 
   cont.appendChild(tarjeta);
 }
@@ -594,7 +671,10 @@ async function cargarCitasBarbero() {
 
         tarjeta.appendChild(crearBoton('Cancelar cita', 'btn-accion', async () => {
           if (!confirm('¿Cancelar esta cita?')) return;
-          const res = await fetch('/reservas/' + c.id + '/cancelar', { method: 'POST' });
+          const res = await fetch('/reservas/' + c.id + '/cancelar', {
+            method: 'POST',
+            headers: cabeceras()
+          });
           if (avisarSiRechazo(res, 'No se pudo cancelar')) {
             actualizarHorasDisponibles();
             actualizarHorasManuales();

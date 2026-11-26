@@ -16,8 +16,32 @@ const AppDataSource = require('./database/data-source');
 const logger = require('./logger');
 
 const DURACION_CITA_MIN = 40;
+const DURACION_CORTE_MIN = 40;
+const DURACION_BARBA_MIN = 20;
+const DURACION_CEJAS_MIN = 15; // Cambia a 20 si prefieres 20 min para cejas
+const MINUTOS_ANTICIPACION_CANCELAR = 60;
 const HORA_INICIO_MIN = 9 * 60;  // 09:00 a. m.
 const HORA_FIN_MIN = 20 * 60;    // 08:00 p. m.
+
+function obtenerDuracionServicio(nombreServicio) {
+  const texto = String(nombreServicio || '').toLowerCase();
+  if (texto.includes('ceja')) return DURACION_CEJAS_MIN;
+  if (texto.includes('barba')) return DURACION_BARBA_MIN;
+  if (texto.includes('corte')) return DURACION_CORTE_MIN;
+  return DURACION_CITA_MIN;
+}
+
+function parsearFechaHoraBogotaMs(fechaHoraStr) {
+  const limpia = String(fechaHoraStr || '').trim();
+  const matchLocal = limpia.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2})/);
+  if (matchLocal) {
+    const [, anio, mes, dia, hh, mm] = matchLocal;
+    const ms = Date.parse(`${anio}-${mes}-${dia}T${hh}:${mm}:00-05:00`);
+    return Number.isNaN(ms) ? null : ms;
+  }
+  const ms = Date.parse(limpia);
+  return Number.isNaN(ms) ? null : ms;
+}
 
 const app = express();
 // Inyección de dependencias
@@ -113,11 +137,12 @@ function construirEnlaceGoogleCalendar(reserva, tituloPrefijo) {
   const [, anio, mes, dia, hh, mm] = match;
   const inicioUtc = new Date(`${anio}-${mes}-${dia}T${hh}:${mm}:00-05:00`);
   if (isNaN(inicioUtc.getTime())) return '';
-  const finUtc = new Date(inicioUtc.getTime() + DURACION_CITA_MIN * 60 * 1000);
+  const duracionMin = obtenerDuracionServicio(reserva.servicio);
+  const finUtc = new Date(inicioUtc.getTime() + duracionMin * 60 * 1000);
 
   const fmt = (d) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
   const titulo = `${tituloPrefijo}: ${reserva.clienteNombre} - ${reserva.servicio}`;
-  const detalle = `Cliente: ${reserva.clienteNombre}\nTelefono: ${reserva.telefono || 'No indicado'}\nServicio: ${reserva.servicio}\nEstado: ${reserva.estado || 'pendiente'}`;
+  const detalle = `Cliente: ${reserva.clienteNombre}\nTelefono: ${reserva.telefono || 'No indicado'}\nServicio: ${reserva.servicio}\nDuracion: ${duracionMin} min\nEstado: ${reserva.estado || 'pendiente'}`;
 
   return (
     'https://calendar.google.com/calendar/render?action=TEMPLATE' +
@@ -168,11 +193,13 @@ app.get('/horarios-ocupados', async (req, res) => {
       const parsed = extraerDiaYMinutos(cita.fechaHora);
       if (!parsed) continue;
       if (diaConsulta && parsed.dia !== diaConsulta) continue;
+      const duracionMin = obtenerDuracionServicio(cita.servicio);
       ocupadas.push({
         fechaHora: cita.fechaHora,
         dia: parsed.dia,
         minutos: parsed.minutos,
-        duracionMin: DURACION_CITA_MIN
+        servicio: cita.servicio,
+        duracionMin
       });
     }
 
@@ -221,11 +248,12 @@ app.post('/reservas', async (req, res, next) => {
       return res.status(400).json({ error: 'Fecha y hora no válidas' });
     }
 
+    const duracionNueva = obtenerDuracionServicio(datos.servicio);
     const inicioNueva = parsedNueva.minutos;
-    const finNueva = inicioNueva + DURACION_CITA_MIN;
+    const finNueva = inicioNueva + duracionNueva;
     if (inicioNueva < HORA_INICIO_MIN || finNueva > HORA_FIN_MIN) {
       return res.status(400).json({
-        error: 'El horario de atención es de 9:00 a. m. a 8:00 p. m. y cada cita dura máximo 40 minutos'
+        error: 'El horario de atención es de 9:00 a. m. a 8:00 p. m.'
       });
     }
 
@@ -236,10 +264,10 @@ app.post('/reservas', async (req, res, next) => {
       if (!parsedExistente || parsedExistente.dia !== parsedNueva.dia) continue;
 
       const inicioEx = parsedExistente.minutos;
-      const finEx = inicioEx + DURACION_CITA_MIN;
+      const finEx = inicioEx + obtenerDuracionServicio(cita.servicio);
       if (hayChoqueHorario(inicioNueva, finNueva, inicioEx, finEx)) {
         return res.status(409).json({
-          error: 'Ese horario ya está ocupado por otra cita (duración de 40 minutos por corte)'
+          error: 'Ese horario ya está ocupado por otra cita'
         });
       }
     }
@@ -295,6 +323,27 @@ app.post('/reservas/:id/cancelar', async (req, res) => {
     if (!Number.isInteger(id)) return res.status(400).json({ error: 'El id debe ser un número' });
     const existente = await reservaService.obtener(id);
     if (!existente) return res.status(404).json({ error: 'Reserva no encontrada' });
+
+    const esAdmin = Boolean(process.env.CLAVE_BARBERO && req.get('x-clave-barbero') === process.env.CLAVE_BARBERO);
+    const telBody = String(req.body?.telefono || '').trim();
+    const nomBody = String(req.body?.clienteNombre || '').trim().toLowerCase();
+    const coincideCliente =
+      (telBody && existente.telefono && telBody === String(existente.telefono).trim()) ||
+      (nomBody && existente.clienteNombre && nomBody === String(existente.clienteNombre).trim().toLowerCase());
+
+    if (!esAdmin && !coincideCliente) {
+      return res.status(403).json({ error: 'Solo el cliente que agendó esta cita puede cancelarla' });
+    }
+
+    if (!esAdmin) {
+      const citaMs = parsearFechaHoraBogotaMs(existente.fechaHora);
+      const minRestantes = citaMs ? (citaMs - Date.now()) / (1000 * 60) : -1;
+      if (minRestantes < MINUTOS_ANTICIPACION_CANCELAR) {
+        return res.status(400).json({
+          error: 'Solo puedes cancelar una cita hasta 1 hora antes de la hora programada'
+        });
+      }
+    }
 
     const actualizada = await reservaService.actualizar(id, { estado: 'cancelada' });
     await registrarAuditoria({
